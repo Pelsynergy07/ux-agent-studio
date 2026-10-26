@@ -1,9 +1,11 @@
-import { Bot, LayoutGrid, Menu as MenuIcon, Monitor, Moon, Plus, Settings2, Sun } from 'lucide-react'
+import { Bot, KeyRound, LayoutGrid, Menu as MenuIcon, Plus } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { AgentInfo, AuthInfo, Decision, DesignSystemInfo, Project, ProjectSummary, ServerInfo, Settings as S, StageId, StageMeta } from '../../shared/types'
 import { api, onAgentEvent } from './api'
 import { Button, IconButton } from './kit/Button'
 import { Banner } from './kit/Feedback'
+import { AccountBar, TokenDialog, UsageDialog } from './components/Account'
+import { Onboarding } from './components/Onboarding'
 import { Agents } from './pages/Agents'
 import { Home } from './pages/Home'
 import { NewProject } from './pages/NewProject'
@@ -27,7 +29,7 @@ export function App() {
   const [decisions, setDecisions] = useState<Decision[]>([])
   const [progress, setProgress] = useState<Progress>({})
   const [toast, setToast] = useState<string | null>(null)
-  const [dialog, setDialog] = useState<'new' | 'settings' | null>(null)
+  const [dialog, setDialog] = useState<'new' | 'settings' | 'token' | 'stats' | 'tutorial' | null>(null)
   const [page, setPage] = useState<'projects' | 'agents'>(location.hash.startsWith('#/agents') ? 'agents' : 'projects')
   const [navOpen, setNavOpen] = useState(false)
   const [theme, setTheme] = useState<ThemePref>(readTheme)
@@ -45,7 +47,11 @@ export function App() {
     api.getStages().then(setStages)
     api.getAgents().then(setAgents)
     api.getDesignSystems().then(setDesignSystems)
-    api.getSettings().then(setSettings)
+    api.getSettings().then((s) => {
+      setSettings(s)
+      // First launch: walk the designer through the app.
+      if (!s.onboardedAt) setDialog('tutorial')
+    })
     api.getServerInfo().then(setServer)
     api.getAuth().then(setAuth)
     void loadProjects()
@@ -111,13 +117,13 @@ export function App() {
     [project?.id, loadProject, loadProjects],
   )
 
-  const cycleTheme = (e: React.MouseEvent) => {
-    const next: ThemePref = theme === 'system' ? 'light' : theme === 'light' ? 'dark' : 'system'
-    const b = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  const changeTheme = (next: ThemePref, from: { x: number; y: number }) => {
     setTheme(next)
-    switchTheme(next, { x: b.left + b.width / 2, y: b.top + b.height / 2 })
+    switchTheme(next, from)
   }
-  const ThemeIcon = theme === 'dark' ? Moon : theme === 'light' ? Sun : Monitor
+  const account = (
+    <AccountBar auth={auth} theme={theme} onTheme={changeTheme} onTutorial={() => setDialog('tutorial')} onSettings={() => setDialog('settings')} onToken={() => setDialog('token')} onStats={() => setDialog('stats')} />
+  )
   const recent = projects.slice(0, 6)
 
   return (
@@ -125,7 +131,10 @@ export function App() {
       <header className="topbar">
         <IconButton icon={MenuIcon} label="Open navigation" onClick={() => setNavOpen(true)} />
         <Brand />
-        <IconButton icon={Plus} label="New project" variant="secondary" onClick={() => setDialog('new')} />
+        <div className="row">
+          <IconButton icon={Plus} label="New project" variant="secondary" onClick={() => setDialog('new')} />
+          {account}
+        </div>
       </header>
       <div className="nav-scrim" onClick={() => setNavOpen(false)} />
 
@@ -156,26 +165,21 @@ export function App() {
             ))}
           </div>
         )}
-        <div className="side-foot">
-          <button className="side-link" onClick={() => setDialog('settings')}>
-            <Settings2 aria-hidden="true" />
-            Settings
-          </button>
-          <div className="side-status">
-            <span className={`conn ${auth?.ok ? 'ok' : auth ? 'bad' : ''}`} title={auth?.message}>
-              <i aria-hidden="true" />
-              {auth === null ? 'Connecting…' : auth.ok ? (auth.login ?? 'Copilot') : 'Copilot offline'}
-            </span>
-            <IconButton icon={ThemeIcon} label={`Theme: ${theme}`} tipSide="top" size="sm" onClick={cycleTheme} />
-          </div>
-        </div>
       </aside>
 
       <main className="main">
+        <div className="main-top">{account}</div>
         {auth && !auth.ok && (
           <div className="main-banner">
-            <Banner tone="danger">
-              GitHub Copilot isn't connected. Run <code>gh auth login</code> with the account that has your Copilot licence, then restart the app.
+            <Banner
+              tone="warn"
+              action={
+                <Button variant="secondary" size="sm" icon={KeyRound} onClick={() => setDialog('token')}>
+                  Connect Copilot
+                </Button>
+              }
+            >
+              The agents need GitHub Copilot. Connect it with your token to start.
             </Banner>
           </div>
         )}
@@ -217,6 +221,17 @@ export function App() {
         />
       )}
       {dialog === 'settings' && <Settings agents={agents} designSystems={designSystems} onClose={() => (setDialog(null), api.getSettings().then(setSettings), loadProjects())} />}
+      {dialog === 'token' && <TokenDialog auth={auth} onChange={setAuth} onClose={() => setDialog(null)} />}
+      {dialog === 'stats' && <UsageDialog onClose={() => setDialog(null)} />}
+      {dialog === 'tutorial' && (
+        <Onboarding
+          auth={auth}
+          onAuth={setAuth}
+          sharingAvailable={!!server?.usageSharing}
+          onClose={() => (setDialog(null), api.getSettings().then(setSettings))}
+          onNewProject={() => setDialog('new')}
+        />
+      )}
       {toast && <Toast message={toast} onDone={() => setToast(null)} />}
     </div>
   )

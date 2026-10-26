@@ -30,12 +30,22 @@ export class Store {
     return path.join(this.dir(id), 'stages', stage)
   }
 
+  /** Projects this version can open. Folders from older versions or with damaged files are skipped, never changed. */
   ids(): string[] {
     if (!fs.existsSync(this.root)) return []
     return fs
       .readdirSync(this.root, { withFileTypes: true })
-      .filter((d) => d.isDirectory() && fs.existsSync(path.join(this.root, d.name, 'project.json')))
+      .filter((d) => d.isDirectory() && this.readable(d.name))
       .map((d) => d.name)
+  }
+
+  private readable(id: string): boolean {
+    try {
+      const p = JSON.parse(fs.readFileSync(path.join(this.root, id, 'project.json'), 'utf8')) as Partial<Project>
+      return Array.isArray(p.pipeline) && !!p.stages && STAGE_IDS.every((s) => p.stages?.[s]?.status)
+    } catch {
+      return false
+    }
   }
 
   /** Creates the project folder. Gate state and the decision log entry come from the orchestrator. */

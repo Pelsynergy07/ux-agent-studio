@@ -23,10 +23,13 @@ Lo-fi and hi-fi screens are real design-system markup (Siemens iX), shown in a g
 | `src/core/designSystems.ts` | Registry of `design-systems/<id>/`: `DESIGN_SYSTEM.md` (rules, sent to designing agents) + `components.md` (catalog, sent to screen agents). Generates the iX wireframe theme from iX's own tokens. |
 | `src/core/screens.ts` | Wraps agent HTML into standalone documents, strips scripts and switches fidelity. |
 | `src/core/llm.ts` | `LLMProvider` + `CopilotProvider` (`@github/copilot-sdk`): model fallback chains, reasoning effort, served-model and token usage. Agents get **no tools**; sessions are deleted after each run. |
-| `src/core/store.ts` | File-based project memory (layout below). Shared with the MCP server. |
+| `src/core/store.ts` | File-based project memory (layout below). Shared with the MCP server. Skips project folders it can't read (older versions, damaged files) without touching them. |
+| `src/core/metrics.ts` | Usage counts derived from project memory, for the designer's stats and optional anonymous sharing. Numbers and fixed ids only. |
 | `src/server/index.ts` | HTTP server: designer API (`/api/*`, this machine only), live events (SSE), stakeholder review API (`/review-api/<token>/*`), and a **separate preview origin on PORT+1** that serves screens. |
 | `src/web/` | React UI: home, project view (phase bar, phase panel, gate), Studio (edit, text, comment, present), Agents page, stakeholder review page. The tool uses its own small kit (`src/web/src/kit/`, Inter, Lucide icons, light and dark tokens in `styles.css`), not iX: only generated screens follow the design system. |
 | `src/mcp/server.ts` | Read-only stdio MCP server over project memory (`out/mcp-server.mjs`). |
+| `scripts/launch.mjs` | One-click start used by `Start UX Agent Studio.command` (Mac) and `.bat` (Windows): checks Node, installs, rebuilds when the source changed, starts or reopens the app. |
+| `telemetry/` | Optional Cloudflare Worker that collects anonymous usage snapshots. The endpoint goes in `telemetry.json`; empty means nothing is sent. |
 | `scripts/logic-test.ts` | Deterministic tests with a mock LLM: `npm run test:logic`. Run them after any change to `src/core` or `src/shared`. |
 | `scripts/smoke.ts` | Real end-to-end run through Copilot on `samples/` (uses Copilot quota). |
 | `scripts/gen-ix-catalog.mjs` | Regenerates `design-systems/ix/components.md` from the installed `@siemens/ix` types. |
@@ -54,6 +57,8 @@ Lo-fi and hi-fi screens are real design-system markup (Siemens iX), shown in a g
 6. **Designer API is local-only.** The server checks the remote address, the Host header (DNS rebinding) and an `x-uxs` header (cross-site requests). Stakeholders only get token-scoped review routes and never see designer comments.
 7. **Screens follow the design system strictly.** The tool's own theme (`styles.css` token layer) must never leak into screens.
 8. **Confidentiality.** Agents get no tools. Don't add network or file tools without a review.
+9. **The Copilot token stays on the machine.** It lives in `~/.ux-agent-studio/credentials.json` (mode 600), is checked before it's saved, and is never returned by the API, logged or exported. Only a hint (last 4 characters) reaches the UI.
+10. **Usage counts carry no content.** `computeMetrics` may only emit numbers and fixed ids (phase, preset, design system, model). Sending needs an endpoint, a finished tutorial and the designer's switch on. Keep the privacy test passing when you add a count.
 
 ## Adding a phase
 1. Add the id to `STAGE_IDS` in `src/shared/types.ts`, and to presets if relevant.

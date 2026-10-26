@@ -7,11 +7,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { loadDesignSystems } from '../src/core/designSystems'
 import type { GenerateRequest, GenerateResult, LLMProvider } from '../src/core/llm'
+import { computeMetrics, snapshot } from '../src/core/metrics'
 import { jsonDiff, Orchestrator } from '../src/core/orchestrator'
 import { Store } from '../src/core/store'
 import { withFidelity } from '../src/core/screens'
 import { pipelineWarnings } from '../src/shared/pipelineRules'
-import { PIPELINE_PRESETS, type StageId } from '../src/shared/types'
+import { PIPELINE_PRESETS, STAGE_IDS, type StageId } from '../src/shared/types'
 
 const fake: Record<StageId | 'casestudy', unknown> = {
   understand: {
@@ -243,6 +244,43 @@ await test('jsonDiff and editor warnings read like sentences', () => {
   const w = pipelineWarnings(['understand', 'shape', 'align', 'lofi'], { shape: ['understand', 'align'], lofi: ['understand', 'align', 'shape'] }, titles).map((x) => x.message)
   assert.ok(w.some((m) => /Shape runs before Align/.test(m)))
   assert.ok(pipelineWarnings(['understand', 'align'], {}, titles).some((x) => /nothing to share/.test(x.message)))
+})
+
+await test('projects from older versions or with damaged files are skipped, not loaded or changed', () => {
+  const before = store.ids().length
+  fs.mkdirSync(path.join(tmp, 'old-format'))
+  const old = JSON.stringify({ id: 'old-format', name: 'Old', stages: { brief: { id: 'brief', status: 'approved', version: 1 } } })
+  fs.writeFileSync(path.join(tmp, 'old-format', 'project.json'), old)
+  fs.mkdirSync(path.join(tmp, 'damaged'))
+  fs.writeFileSync(path.join(tmp, 'damaged', 'project.json'), '{ not json')
+  assert.equal(store.ids().length, before)
+  orch.recoverInterrupted()
+  assert.equal(orch.summaries().length, before)
+  assert.equal(fs.readFileSync(path.join(tmp, 'old-format', 'project.json'), 'utf8'), old)
+})
+
+await test('usage counts: numbers and fixed ids only, nothing designers typed', () => {
+  const m = computeMetrics(store)
+  assert.ok(m.projects >= 3 && m.approvals > 0 && m.signOffs >= 1 && (m.drafts.understand ?? 0) > 0 && m.comments.stakeholder > 0 && m.transcriptWords > 0)
+  assert.ok(m.medianHoursToSignOff !== null && m.models.mock > 0)
+  const snap = snapshot(m, { installId: 'install-1', firstRunAt: '2026-01-02T03:04:05Z', appVersion: '0.1.0', os: 'darwin' })
+  // Every string value is one of the header fields; every record key comes from a fixed list.
+  const strings: string[] = []
+  const keys: string[] = []
+  const walk = (v: unknown, inRecord: boolean) => {
+    if (typeof v === 'string') strings.push(v)
+    else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) (inRecord && keys.push(k), walk(x, false))
+  }
+  for (const r of [m.presets, m.designSystems, m.drafts, m.models]) walk(r, true)
+  walk(snap, false)
+  assert.deepEqual(strings.sort(), [snap.appVersion, snap.firstRunDay, snap.installId, snap.os, snap.sentAt].sort())
+  const allowed = new Set<string>([...PIPELINE_PRESETS.map((p) => p.id), 'custom', ...designSystems.keys(), ...STAGE_IDS, 'casestudy', 'mock'])
+  assert.deepEqual(keys.filter((k) => !allowed.has(k)), [])
+  const text = JSON.stringify(snap)
+  for (const id of store.ids()) {
+    assert.ok(!text.includes(store.get(id).name), 'project name leaked')
+    for (const c of store.comments(id)) assert.ok(!text.includes(c.text), 'comment leaked')
+  }
 })
 
 fs.rmSync(tmp, { recursive: true, force: true })

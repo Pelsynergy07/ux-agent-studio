@@ -221,6 +221,10 @@ export interface AuthInfo {
   login?: string
   method?: string
   message?: string
+  /** 'token': the designer's saved Copilot token. 'signed-in': the GitHub sign-in already on this machine. */
+  source?: 'token' | 'signed-in'
+  /** Last characters of the saved token, so designers can tell which one is in use. Never the token itself. */
+  tokenHint?: string
 }
 
 export interface Settings {
@@ -229,6 +233,67 @@ export interface Settings {
   projectsDir: string
   autoRunNext: boolean
   defaultDesignSystem: string
+  /** Random id for this install. Identifies nobody; lets anonymous usage counts be told apart. */
+  installId: string
+  firstRunAt: string
+  /** Set when the first-run tutorial was finished or skipped. */
+  onboardedAt: string
+  /** Share anonymous usage counts (only when the distributor configured an endpoint). */
+  telemetry: boolean
+}
+
+/** Counts derived from project memory. Numbers and fixed ids only: never names, transcripts, comments or screens. */
+export interface UsageMetrics {
+  projects: number
+  /** Projects per process preset ('custom' for edited ones). */
+  presets: Record<string, number>
+  /** Projects per design system id. */
+  designSystems: Record<string, number>
+  transcriptWords: number
+  /** Agent drafts and revisions, per phase. */
+  drafts: Record<string, number>
+  approvals: number
+  changeRequests: number
+  /** Hand edits to documents (fields) and to screens (text). */
+  documentEdits: number
+  screenTextEdits: number
+  /** Single-screen revisions asked for in the studio. */
+  studioEdits: number
+  reopens: number
+  answersRecorded: number
+  comments: { designer: number; stakeholder: number }
+  notes: number
+  lofisShared: number
+  stakeholderVerdicts: number
+  signOffs: number
+  /** Median hours from project creation to stakeholder sign-off. */
+  medianHoursToSignOff: number | null
+  caseStudies: number
+  agentRuns: number
+  agentMinutes: number
+  inputTokens: number
+  outputTokens: number
+  premiumRequests: number
+  /** Runs per model Copilot actually served. */
+  models: Record<string, number>
+}
+
+/** Exactly what is sent when anonymous usage sharing is on. */
+export interface UsageSnapshot {
+  schema: 1
+  installId: string
+  appVersion: string
+  os: string
+  firstRunDay: string
+  sentAt: string
+  metrics: UsageMetrics
+}
+
+export interface UsageStats {
+  metrics: UsageMetrics
+  sharing: { available: boolean; enabled: boolean; lastSentAt?: string }
+  /** The payload as it would be sent right now. */
+  preview: UsageSnapshot
 }
 
 export interface StageMeta {
@@ -246,6 +311,8 @@ export interface ServerInfo {
   lan: boolean
   /** Screens are served from this port on the same host (a separate origin from the app). */
   previewPort: number
+  /** Anonymous usage sharing is configured for this copy of the app. */
+  usageSharing: boolean
 }
 
 /** The API the web UI calls (POST /api/<method>). */
@@ -288,6 +355,10 @@ export interface UxsApi {
   getModels(): Promise<{ id: string; name: string; multiplier?: number }[]>
   getAuth(): Promise<AuthInfo>
   getSettings(): Promise<Settings>
+  /** Checks the token with Copilot and saves it on this machine only if it works. */
+  saveToken(token: string): Promise<AuthInfo>
+  clearToken(): Promise<AuthInfo>
+  getUsageStats(): Promise<UsageStats>
   saveSettings(s: Partial<Settings>): Promise<Settings>
   getMcpConfig(): Promise<string>
   getServerInfo(): Promise<ServerInfo>

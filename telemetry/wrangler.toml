@@ -1,0 +1,8 @@
+name = "ux-agent-studio-usage"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ux-agent-studio-usage"
+database_id = "REPLACE_WITH_THE_ID_FROM_wrangler_d1_create"

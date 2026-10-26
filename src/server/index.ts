@@ -8,6 +8,7 @@
 // network can only open a review page and its screens with an unguessable per-project token.
 
 import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
@@ -16,6 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { AGENT_IDS, agentDetails, deletePack, listPacks, loadAgent, readShared, saveAgent, savePack, saveShared, type Effort } from '../core/agents'
 import { loadDesignSystems, IX_CDN, IX_ICONS_CDN } from '../core/designSystems'
 import { CopilotProvider } from '../core/llm'
+import { computeMetrics, snapshot } from '../core/metrics'
 import { Orchestrator } from '../core/orchestrator'
 import { STAGES } from '../core/pipeline'
 import { Store } from '../core/store'
@@ -32,14 +34,39 @@ const DEV = process.env.UXS_DEV === '1'
 
 // ---------- settings ----------
 
-const settingsFile = path.join(os.homedir(), '.ux-agent-studio', 'settings.json')
+const configDir = path.join(os.homedir(), '.ux-agent-studio')
+const settingsFile = path.join(configDir, 'settings.json')
 const defaults: Settings = {
   model: '',
   projectsDir: path.join(os.homedir(), 'Documents', 'UX Agent Studio', 'Projects'),
   autoRunNext: true,
   defaultDesignSystem: 'ix',
+  installId: '',
+  firstRunAt: '',
+  onboardedAt: '',
+  telemetry: true,
 }
 let settings: Settings = { ...defaults, ...readJson(settingsFile) }
+if (!settings.installId) {
+  settings = { ...settings, installId: randomUUID(), firstRunAt: new Date().toISOString() }
+  writeSettings()
+}
+
+function writeSettings() {
+  fs.mkdirSync(configDir, { recursive: true })
+  fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2))
+}
+
+// The designer's Copilot token lives in its own file, readable only by them. It never goes back to the browser.
+const credentialsFile = path.join(configDir, 'credentials.json')
+let copilotToken: string | undefined = readJson(credentialsFile).copilotToken || undefined
+function writeToken(token: string | undefined) {
+  copilotToken = token
+  fs.mkdirSync(configDir, { recursive: true })
+  fs.writeFileSync(credentialsFile, JSON.stringify(token ? { copilotToken: token } : {}), { mode: 0o600 })
+  fs.chmodSync(credentialsFile, 0o600)
+}
+const tokenHint = () => (copilotToken ? `…${copilotToken.slice(-4)}` : undefined)
 // --projects <dir> points this run at another folder (demos, tests) without changing saved settings.
 if (argv('--projects')) settings.projectsDir = path.resolve(argv('--projects')!)
 
@@ -57,7 +84,7 @@ const ixDist = path.join(ROOT, 'node_modules', '@siemens', 'ix', 'dist')
 const ixIconsRoot = path.join(ROOT, 'node_modules', '@siemens', 'ix-icons')
 const agentsDir = path.join(ROOT, 'agents')
 const designSystems = loadDesignSystems(path.join(ROOT, 'design-systems'), ixDist)
-const llm = new CopilotProvider()
+const llm = new CopilotProvider(() => copilotToken)
 const clients = new Set<http.ServerResponse>()
 const emit = (e: AgentEvent) => {
   for (const c of clients) c.write(`data: ${JSON.stringify(e)}\n\n`)
@@ -69,6 +96,26 @@ orch.recoverInterrupted()
 function makeOrchestrator() {
   return new Orchestrator({ store, llm, agentsDir, designSystems, modelOverride: () => settings.model, autoRunNext: () => settings.autoRunNext, emit })
 }
+
+// ---------- anonymous usage counts ----------
+// Sent only when the person distributing the app set an endpoint (telemetry.json or UXS_TELEMETRY_URL),
+// the designer has seen the choice in the tutorial, and sharing is on. See src/core/metrics.ts for what's counted.
+
+const appVersion: string = readJson(path.join(ROOT, 'package.json')).version ?? '0.0.0'
+const telemetryEndpoint: string = process.env.UXS_TELEMETRY_URL ?? readJson(path.join(ROOT, 'telemetry.json')).endpoint ?? ''
+let lastSentAt: string | undefined
+const usageSnapshot = () => snapshot(computeMetrics(store), { installId: settings.installId, firstRunAt: settings.firstRunAt, appVersion, os: process.platform })
+async function sendUsage() {
+  if (!telemetryEndpoint || !settings.telemetry || !settings.onboardedAt) return
+  try {
+    const res = await fetch(telemetryEndpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(usageSnapshot()), signal: AbortSignal.timeout(8000) })
+    if (res.ok) lastSentAt = new Date().toISOString()
+  } catch {
+    // Offline or blocked: try again next time. Usage counts must never get in the designer's way.
+  }
+}
+setTimeout(sendUsage, 15_000).unref()
+setInterval(sendUsage, 6 * 3_600_000).unref()
 
 const mcpConfig = () =>
   JSON.stringify({ mcpServers: { 'ux-agent-studio': { command: 'node', args: [path.join(ROOT, 'out', 'mcp-server.mjs'), '--projects', settings.projectsDir] } } }, null, 2)
@@ -128,19 +175,39 @@ const api: { [K in keyof UxsApi]: (...a: Parameters<UxsApi[K]>) => unknown } = {
   deletePack: (id) => deletePack(agentsDir, id),
   getDesignSystems: () => [...designSystems.values()].map(({ id, name, description, renderable }) => ({ id, name, description, renderable })),
   getModels: async () => (await llm.models()).map((m) => ({ id: m.id, name: m.name, multiplier: m.billing?.multiplier })),
-  getAuth: () => llm.auth(),
+  getAuth: async () => ({ ...(await llm.auth()), tokenHint: tokenHint() }),
+  saveToken: async (token) => {
+    const t = String(token ?? '').trim()
+    if (!t) throw new Error('Paste your token first.')
+    const check = await llm.check(t)
+    if (!check.ok) throw new Error(`Copilot didn't accept that token${check.message ? `: ${check.message}` : '.'}`)
+    writeToken(t)
+    await llm.reset()
+    return { ...(await llm.auth()), tokenHint: tokenHint() }
+  },
+  clearToken: async () => {
+    writeToken(undefined)
+    await llm.reset()
+    return llm.auth()
+  },
+  getUsageStats: () => {
+    const preview = usageSnapshot()
+    return { metrics: preview.metrics, sharing: { available: !!telemetryEndpoint, enabled: settings.telemetry, lastSentAt }, preview }
+  },
   getSettings: () => settings,
   saveSettings: (s) => {
-    settings = { ...settings, ...s }
-    fs.mkdirSync(path.dirname(settingsFile), { recursive: true })
-    fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2))
+    const { installId: _i, firstRunAt: _f, ...patch } = s
+    const firstOnboarding = !settings.onboardedAt && !!patch.onboardedAt
+    settings = { ...settings, ...patch }
+    writeSettings()
+    if (firstOnboarding) void sendUsage()
     store = new Store(settings.projectsDir)
     orch = makeOrchestrator()
     orch.recoverInterrupted()
     return settings
   },
   getMcpConfig: () => mcpConfig(),
-  getServerInfo: () => ({ reviewBase: [`http://localhost:${PORT}`, ...(LAN ? lanAddresses().map((a) => `http://${a}:${PORT}`) : [])], lan: LAN, previewPort: PREVIEW_PORT }),
+  getServerInfo: () => ({ reviewBase: [`http://localhost:${PORT}`, ...(LAN ? lanAddresses().map((a) => `http://${a}:${PORT}`) : [])], lan: LAN, previewPort: PREVIEW_PORT, usageSharing: !!telemetryEndpoint }),
 }
 
 // ---------- http ----------

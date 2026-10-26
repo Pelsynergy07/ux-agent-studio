@@ -32,15 +32,21 @@ export interface LLMProvider {
 
 const TIMEOUT_MS = 15 * 60 * 1000
 
+const clientFor = (token?: string) => new CopilotClient(token ? { gitHubToken: token, useLoggedInUser: false } : {})
+const toAuth = (s: { isAuthenticated: boolean; login?: string; authType?: string; statusMessage?: string }): AuthInfo => ({ ok: s.isAuthenticated, login: s.login, method: s.authType, message: s.statusMessage })
+
 export class CopilotProvider implements LLMProvider {
   private client: CopilotClient | null = null
   private starting: Promise<CopilotClient> | null = null
   private modelCache: { at: number; list: ModelInfo[] } | null = null
 
+  /** `token` returns the designer's saved Copilot token; without one, the GitHub sign-in on this machine is used. */
+  constructor(private readonly token: () => string | undefined = () => undefined) {}
+
   private async getClient(): Promise<CopilotClient> {
     if (this.client) return this.client
     this.starting ??= (async () => {
-      const c = new CopilotClient()
+      const c = clientFor(this.token())
       await c.start()
       this.client = c
       return c
@@ -52,12 +58,34 @@ export class CopilotProvider implements LLMProvider {
   }
 
   async auth(): Promise<AuthInfo> {
+    const source = this.token() ? 'token' : 'signed-in'
     try {
-      const s = await (await this.getClient()).getAuthStatus()
-      return { ok: s.isAuthenticated, login: s.login, method: s.authType, message: s.statusMessage }
+      return { ...toAuth(await (await this.getClient()).getAuthStatus()), source }
     } catch (e) {
-      return { ok: false, message: (e as Error).message }
+      return { ok: false, message: (e as Error).message, source }
     }
+  }
+
+  /** Signs in with a token on a throwaway client, so a bad token never replaces a working one. */
+  async check(token: string): Promise<AuthInfo> {
+    const c = clientFor(token)
+    try {
+      await c.start()
+      return { ...toAuth(await c.getAuthStatus()), source: 'token' }
+    } catch (e) {
+      return { ok: false, message: (e as Error).message, source: 'token' }
+    } finally {
+      await c.stop().catch(() => {})
+    }
+  }
+
+  /** Drops the running client so the next call signs in with the current token. */
+  async reset(): Promise<void> {
+    const c = this.client
+    this.client = null
+    this.starting = null
+    this.modelCache = null
+    await c?.stop().catch(() => {})
   }
 
   /** Models the signed-in account may use (cached for 10 minutes). Empty when Copilot doesn't expose a catalog. */
