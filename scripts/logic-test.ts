@@ -10,7 +10,7 @@ import type { GenerateRequest, GenerateResult, LLMProvider } from '../src/core/l
 import { computeMetrics, snapshot } from '../src/core/metrics'
 import { jsonDiff, Orchestrator } from '../src/core/orchestrator'
 import { Store } from '../src/core/store'
-import { withFidelity } from '../src/core/screens'
+import { prototypeLinks, stripScripts, withFidelity } from '../src/core/screens'
 import { pipelineWarnings } from '../src/shared/pipelineRules'
 import { PIPELINE_PRESETS, STAGE_IDS, type StageId } from '../src/shared/types'
 
@@ -180,6 +180,24 @@ await test('studio text edits: attribute text is diffed, runtime markup is strip
   assert.match(d.note!, /“Acknowledge” → “Acknowledge all”/)
   const saved = (orch.artifact(id, 'lofi')!.data as { screens: { bodyHtml: string }[] }).screens[0].bodyHtml
   assert.doesNotMatch(saved, /hydrated|contenteditable/)
+})
+
+await test('prototype: lo-fi is told to link screens; links survive cleaning; link edits are logged in words', () => {
+  assert.match(seen.lofi.system, /data-goto="<screen id>"/)
+  assert.match(stripScripts('<ix-button data-goto="b" onclick="x()">Go</ix-button>'), /data-goto="b"/)
+  assert.deepEqual(prototypeLinks('<ix-button variant="primary" data-goto="alarm-detail">Investigate</ix-button><ix-menu-item label="Trends" data-goto="trend"></ix-menu-item>'), [
+    { label: 'Investigate', goto: 'alarm-detail' },
+    { label: 'Trends', goto: 'trend' },
+  ])
+  const body = (orch.artifact(id, 'lofi')!.data as { screens: { bodyHtml: string }[] }).screens[0].bodyHtml
+  orch.saveScreenBody(id, 'lofi', 'alarm-list', body.replace('<ix-button>', '<ix-button data-goto="alarm-detail" data-uxs-picked="">'))
+  const d = last(id)
+  assert.equal(d.action, 'edited')
+  assert.match(d.note!, /linked “Acknowledge all” → alarm-detail/)
+  assert.match(d.details!, /Links added:\n\+ “Acknowledge all” → alarm-detail/)
+  const saved = (orch.artifact(id, 'lofi')!.data as { screens: { bodyHtml: string }[] }).screens[0].bodyHtml
+  assert.match(saved, /data-goto="alarm-detail"/)
+  assert.doesNotMatch(saved, /data-uxs-/)
 })
 
 await test('pipeline edits: phases that ran are fixed; future phases can be added; logged with before/after', () => {

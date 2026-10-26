@@ -1,6 +1,7 @@
 // Screen previews for designers and stakeholders: real design-system screens, scaled from a true
-// desktop viewport. Primary controls: fidelity, comment, studio, present; the rest under "More".
-import { Columns2, Maximize2, MessageSquare, Monitor, MoreHorizontal, Palette, ScanLine, Tablet, Wand2 } from 'lucide-react'
+// desktop viewport, clickable as a prototype (data-goto links). Primary controls: fidelity, comment,
+// studio, present; the rest under "More".
+import { Columns2, Maximize2, MessageSquare, Monitor, MoreHorizontal, MousePointerClick, Palette, ScanLine, Tablet, Wand2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { Comment, Screen } from '../../../shared/types'
 import { previewOrigin } from '../api'
@@ -39,6 +40,9 @@ export function ScreenViewer({ screens, previous, version, canSwitchFidelity, co
   const [picked, setPicked] = useState<Picked | null>(null)
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
+  const [hotspots, setHotspots] = useState(false)
+  const [links, setLinks] = useState<number | null>(null)
+  const frames = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!screens.find((s) => s.id === active)) setActive(screens[0]?.id)
@@ -46,16 +50,28 @@ export function ScreenViewer({ screens, previous, version, canSwitchFidelity, co
 
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
-      if (e.origin === previewOrigin() && e.data?.type === 'uxs-pick' && commenting) setPicked({ screenId: active!, element: e.data.element })
+      if (e.origin !== previewOrigin()) return
+      if (e.data?.type === 'uxs-pick' && commenting) setPicked({ screenId: active!, element: e.data.element })
+      // Prototype: a clicked link moves to its screen; links to unknown screens are ignored.
+      if (e.data?.type === 'uxs-goto' && !commenting && screens.some((s) => s.id === e.data.screen)) setActive(e.data.screen)
+      if (e.data?.type === 'uxs-proto-ready') {
+        setLinks(e.data.links)
+        ;(e.source as Window | null)?.postMessage({ type: 'uxs-hotspots', on: hotspots }, '*')
+      }
     }
     window.addEventListener('message', onMsg)
     return () => window.removeEventListener('message', onMsg)
-  }, [commenting, active])
+  }, [commenting, active, screens, hotspots])
+
+  useEffect(() => setLinks(null), [active, commenting])
+  useEffect(() => {
+    frames.current?.querySelectorAll('iframe').forEach((f) => f.contentWindow?.postMessage({ type: 'uxs-hotspots', on: hotspots }, '*'))
+  }, [hotspots])
 
   const screen = screens.find((s) => s.id === active)
   if (!screen) return <p className="muted">No screens yet.</p>
   const prevScreen = previous?.screens.find((s) => s.id === active)
-  const src = (s: Screen) => `${previewOrigin()}${s.url}?${new URLSearchParams({ fidelity: canSwitchFidelity ? fidelity : '', annotate: commenting ? '1' : '' })}${query}`
+  const src = (s: Screen) => `${previewOrigin()}${s.url}?${new URLSearchParams({ fidelity: canSwitchFidelity ? fidelity : '', annotate: commenting ? '1' : '', proto: commenting ? '' : '1' })}${query}`
   const mine = comments.filter((c) => c.screenId === active)
   const openCount = (id: string) => comments.filter((c) => c.screenId === id && !c.sentInVersion).length
   const unsent = mine.filter((c) => !c.sentInVersion).length
@@ -89,6 +105,7 @@ export function ScreenViewer({ screens, previous, version, canSwitchFidelity, co
               ]}
             />
           )}
+          {!commenting && links !== null && links > 0 && <IconButton icon={MousePointerClick} label={hotspots ? 'Hide clickable areas' : 'Show clickable areas'} active={hotspots} variant="secondary" onClick={() => setHotspots((h) => !h)} />}
           <IconButton icon={MessageSquare} label={commenting ? 'Stop commenting' : 'Comment on screen'} active={commenting} badge={unsent || undefined} variant="secondary" onClick={() => (setCommenting((c) => !c), setPicked(null))} />
           <Menu
             trigger={(toggle) => <IconButton icon={MoreHorizontal} label="More" variant="secondary" onClick={toggle} />}
@@ -111,10 +128,18 @@ export function ScreenViewer({ screens, previous, version, canSwitchFidelity, co
       </div>
 
       <div className={`viewer-body ${commenting ? 'with-panel' : ''}`}>
-        <div className={`frames ${compare && prevScreen ? 'two' : ''}`}>
+        <div className={`frames ${compare && prevScreen ? 'two' : ''}`} ref={frames}>
           {compare && prevScreen && <Frame label={`v${previous!.version}`} src={src(prevScreen)} viewport={viewport} />}
           <Frame label={compare ? `v${version} · current` : undefined} src={src(screen)} viewport={viewport} highlight={commenting} />
-          <p className="screen-purpose">{screen.purpose}</p>
+          <p className="screen-purpose">
+            <span>{screen.purpose}</span>
+            {!commenting && links !== null && (
+              <span className="proto-hint">
+                <MousePointerClick aria-hidden="true" />
+                {links > 0 ? `Clickable prototype: ${links} link${links > 1 ? 's' : ''} on this screen` : 'No links on this screen yet'}
+              </span>
+            )}
+          </p>
         </div>
 
         {commenting && (

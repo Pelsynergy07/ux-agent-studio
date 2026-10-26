@@ -42,6 +42,7 @@ The app opens at http://localhost:4317. Without a saved token it uses the GitHub
 ## Highlights
 - **Progressive disclosure.** Each phase shows a short summary. Details sit in collapsed sections and open when you want them.
 - **Targeted feedback.** Comment on any item, or click any element on a screen. Comments go to the agent together with your next revision.
+- **Clickable prototype.** The lo-fi agent links screens the way the flow moves, so designers and stakeholders click through them like a Figma prototype. Fix or add links by hand in the studio's Link mode.
 - **Studio.** Describe a change and the agent edits just that screen; click text to edit it directly; compare versions.
 - **Present mode.** Full-screen walkthroughs for review meetings, with click-to-comment and "who said it".
 - **Stakeholder sign-off.** A link with element-level comments and Approve or Ask for changes. The app measures the time from kickoff to sign-off.

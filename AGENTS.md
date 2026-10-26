@@ -53,7 +53,8 @@ Lo-fi and hi-fi screens are real design-system markup (Siemens iX), shown in a g
 2. **Every steering action is logged** with actor and full text: feedback, edits (field or text diffs), answers, comments, pipeline changes, reopen reasons and stakeholder verdicts. New actions must log too.
 3. **Downstream reads approved output only**, from phases earlier in this project's pipeline.
 4. **Reopening a phase relocks every later phase.** Phases that already ran can't be removed or moved.
-5. **Agent HTML is untrusted.** It goes through `stripScripts` and is served only from the preview origin (PORT+1), never the app origin. Text editing (`edit=1`) is honoured only for local requests.
+5. **Agent HTML is untrusted.** It goes through `stripScripts` and is served only from the preview origin (PORT+1), never the app origin. The only scripts in a screen are the server's own (comment picking, text editing, link editing, prototype). Text and link editing (`edit=1`, `link=1`) are honoured only for local requests.
+   Prototype links are plain `data-goto="<screen id>"` attributes; the parent page swaps screens, so screens never navigate themselves.
 6. **Designer API is local-only.** The server checks the remote address, the Host header (DNS rebinding) and an `x-uxs` header (cross-site requests). Stakeholders only get token-scoped review routes and never see designer comments.
 7. **Screens follow the design system strictly.** The tool's own theme (`styles.css` token layer) must never leak into screens.
 8. **Confidentiality.** Agents get no tools. Don't add network or file tools without a review.

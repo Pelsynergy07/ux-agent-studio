@@ -1,19 +1,23 @@
 // The studio: a full-window workspace for screens, in the spirit of Lovable / Figma Make.
+//   Play     – click through the screens as a prototype (data-goto links).
 //   Edit     – describe a change (optionally pointing at an element); the agent revises that screen.
 //   Text     – click any text on the screen and type; saved on blur, logged as a hand edit.
+//   Link     – pick a clickable element and choose which screen it opens; saved like a text edit.
 //   Comment  – click an element and leave a comment (for the next revision or for the record).
-//   Present  – true full screen for review meetings: arrow keys between screens, comment in place.
-import { ChevronLeft, ChevronRight, LogOut, Maximize2, MessageSquare, Palette, ScanLine, Type, Wand2, X } from 'lucide-react'
+//   Present  – true full screen for review meetings: click through or use arrow keys, comment in place.
+import { ArrowRight, ChevronLeft, ChevronRight, Link2, LogOut, Maximize2, MessageSquare, MousePointerClick, Palette, ScanLine, Type, Unlink, Wand2, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Comment, Decision, Project, StageArtifact, StageId } from '../../../shared/types'
 import { api, previewOrigin } from '../api'
 import { Button, IconButton, Segmented } from '../kit/Button'
 import { Spinner } from '../kit/Feedback'
+import { Select } from '../kit/Field'
 import { ago, cleanError } from '../ui'
 import { CommentRow } from './editors'
 
-type Mode = 'edit' | 'text' | 'comment'
+type Mode = 'play' | 'edit' | 'text' | 'link' | 'comment'
+type LinkEl = El & { selector: string; goto: string }
 type El = NonNullable<Comment['element']>
 const VIEW = { w: 1440, h: 900 }
 
@@ -45,13 +49,16 @@ export function Studio({ project, stage, artifact, comments, decisions, running,
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState<string | null>(null)
   const [attrs, setAttrs] = useState<{ selector: string; tag: string; attrs: Record<string, string> } | null>(null)
+  const [linkTarget, setLinkTarget] = useState<LinkEl | null>(null)
+  const [links, setLinks] = useState<LinkEl[]>([])
+  const [hotspots, setHotspots] = useState(false)
   const screen = screens[Math.min(index, screens.length - 1)]
   const isLofi = stage === 'lofi'
 
   // Present: real browser full screen. Leaving full screen (Esc) returns to the studio.
   const enterPresent = useCallback(async () => {
     setPresent(true)
-    setMode('comment')
+    setMode('play')
     try {
       await root.current?.requestFullscreen()
     } catch {
@@ -89,7 +96,14 @@ export function Studio({ project, stage, artifact, comments, decisions, running,
       if (e.origin !== previewOrigin() || !screen) return
       if (e.data?.type === 'uxs-pick') setTarget(e.data.element)
       if (e.data?.type === 'uxs-attrs' && mode === 'text') setAttrs(e.data)
-      if (e.data?.type === 'uxs-edit' && mode === 'text') {
+      if (e.data?.type === 'uxs-goto' && mode === 'play') {
+        const i = screens.findIndex((s) => s.id === e.data.screen)
+        if (i > -1) setIndex(i)
+      }
+      if (e.data?.type === 'uxs-proto-ready') (e.source as Window | null)?.postMessage({ type: 'uxs-hotspots', on: hotspots }, '*')
+      if (e.data?.type === 'uxs-link-pick' && mode === 'link') setLinkTarget(e.data.element)
+      if (e.data?.type === 'uxs-links' && mode === 'link') setLinks(e.data.links)
+      if (e.data?.type === 'uxs-edit' && (mode === 'text' || mode === 'link')) {
         try {
           await api.saveScreenBody(project.id, stage, screen.id, e.data.html)
           setSaved(`Saved ${new Date().toLocaleTimeString()}`)
@@ -101,12 +115,22 @@ export function Studio({ project, stage, artifact, comments, decisions, running,
     }
     window.addEventListener('message', onMsg)
     return () => window.removeEventListener('message', onMsg)
-  }, [mode, screen?.id, project.id, stage])
+  }, [mode, screen?.id, project.id, stage, screens, hotspots])
 
-  useEffect(() => (setTarget(null), setAttrs(null)), [index, mode])
+  useEffect(() => (setTarget(null), setAttrs(null), setLinkTarget(null), setLinks([])), [index, mode])
+  useEffect(() => {
+    document.querySelector<HTMLIFrameElement>('.studio .fit-frame iframe')?.contentWindow?.postMessage({ type: 'uxs-hotspots', on: hotspots }, '*')
+  }, [hotspots])
+  const toFrame = (msg: object) => document.querySelector<HTMLIFrameElement>('.studio .fit-frame iframe')?.contentWindow?.postMessage(msg, previewOrigin())
   if (!screen) return null
 
-  const q = new URLSearchParams({ fidelity: isLofi ? fidelity : '', annotate: mode === 'edit' || mode === 'comment' ? '1' : '', edit: mode === 'text' && editable ? '1' : '' })
+  const q = new URLSearchParams({
+    fidelity: isLofi ? fidelity : '',
+    annotate: mode === 'edit' || mode === 'comment' ? '1' : '',
+    edit: mode === 'text' && editable ? '1' : '',
+    link: mode === 'link' && editable ? '1' : '',
+    proto: mode === 'play' ? '1' : '',
+  })
   const src = `${previewOrigin()}${screen.url}?${q}`
   const screenComments = comments.filter((c) => c.screenId === screen.id)
   const history = decisions.filter((d) => d.stage === stage && (d.action === 'changes_requested' || d.action === 'generated' || d.action === 'edited') && d.note?.startsWith(`${screen.title}:`)).reverse()
@@ -166,7 +190,14 @@ export function Studio({ project, stage, artifact, comments, decisions, running,
               value={mode}
               onChange={setMode}
               options={[
-                ...(editable ? [{ value: 'edit' as Mode, label: 'Edit', icon: Wand2 }, { value: 'text' as Mode, label: 'Text', icon: Type }] : []),
+                { value: 'play' as Mode, label: 'Play', icon: MousePointerClick },
+                ...(editable
+                  ? [
+                      { value: 'edit' as Mode, label: 'Edit', icon: Wand2 },
+                      { value: 'text' as Mode, label: 'Text', icon: Type },
+                      { value: 'link' as Mode, label: 'Link', icon: Link2 },
+                    ]
+                  : []),
                 { value: 'comment' as Mode, label: 'Comment', icon: MessageSquare },
               ]}
             />
@@ -215,6 +246,39 @@ export function Studio({ project, stage, artifact, comments, decisions, running,
         {!present && (
           <aside className="studio-panel">
             {error && <p className="danger-text small">{error}</p>}
+            {mode === 'play' && (
+              <>
+                <h3>Click through</h3>
+                <p className="muted small">Use the screen like the real product: clickable elements open the screen they link to. Clicking anywhere else briefly shows what is clickable.</p>
+                <Button variant="secondary" icon={MousePointerClick} onClick={() => setHotspots((h) => !h)}>
+                  {hotspots ? 'Hide clickable areas' : 'Show clickable areas'}
+                </Button>
+                {editable && (
+                  <p className="muted small">
+                    Missing a link? Switch to{' '}
+                    <button className="link" onClick={() => setMode('link')}>
+                      Link
+                    </button>{' '}
+                    and connect it.
+                  </p>
+                )}
+              </>
+            )}
+            {mode === 'link' && (
+              <LinkPanel
+                screens={screens.map((s) => ({ id: s.id, title: s.title }))}
+                current={screen.id}
+                target={linkTarget}
+                links={links}
+                saved={saved}
+                onPick={(selector) => toFrame({ type: 'uxs-pick-selector', selector })}
+                onLink={(goto) => {
+                  if (!linkTarget) return
+                  toFrame({ type: 'uxs-set-link', selector: linkTarget.selector, screen: goto })
+                  setLinkTarget({ ...linkTarget, goto })
+                }}
+              />
+            )}
             {mode === 'edit' && (
               <>
                 <h3>Describe a change</h3>
@@ -279,7 +343,8 @@ export function Studio({ project, stage, artifact, comments, decisions, running,
         <div className="present-bar">
           {nav}
           <span className="tool-sep" aria-hidden="true" />
-          <IconButton icon={MessageSquare} label="Comment" active={mode === 'comment'} onClick={() => setMode(mode === 'comment' ? 'edit' : 'comment')} />
+          <IconButton icon={MessageSquare} label={mode === 'comment' ? 'Back to clicking through' : 'Comment'} active={mode === 'comment'} onClick={() => setMode(mode === 'comment' ? 'play' : 'comment')} />
+          <IconButton icon={MousePointerClick} label={hotspots ? 'Hide clickable areas' : 'Show clickable areas'} active={hotspots} onClick={() => setHotspots((h) => !h)} />
           {isLofi && <IconButton icon={Palette} label={fidelity === 'full' ? 'Show wireframe' : 'Show in colour'} active={fidelity === 'full'} onClick={() => setFidelity(fidelity === 'full' ? 'wireframe' : 'full')} />}
           <Button variant="secondary" size="sm" icon={LogOut} onClick={exitPresent}>
             Exit
@@ -302,8 +367,58 @@ export function Studio({ project, stage, artifact, comments, decisions, running,
         </div>
       )}
       {present && mode === 'comment' && !target && <div className="present-hint">Click anything on the screen to comment on it</div>}
+      {present && mode === 'play' && (
+        <div className="present-hint fleeting" key={screen.id}>
+          {screen.title} · click through, or use ← →
+        </div>
+      )}
     </div>,
     document.body,
+  )
+}
+
+/** Link mode: pick a clickable element on the screen, then choose the screen it opens. */
+function LinkPanel({ screens, current, target, links, saved, onPick, onLink }: { screens: { id: string; title: string }[]; current: string; target: LinkEl | null; links: LinkEl[]; saved: string | null; onPick: (selector: string) => void; onLink: (goto: string) => void }) {
+  const title = (id: string) => screens.find((s) => s.id === id)?.title ?? id
+  return (
+    <>
+      <h3>Link screens</h3>
+      <p className="muted small">Click a button, row or menu item on the screen, then choose where it goes. Linked elements are outlined. Every change is in the decision log.</p>
+      {saved && <p className="ok-text small">{saved}</p>}
+      {target ? (
+        <div className="link-editor">
+          <div className="target-chip">
+            <span>
+              &lt;{target.tag}&gt; {target.text || 'element'}
+            </span>
+          </div>
+          <Select label="Opens" value={target.goto} onChange={(e) => onLink(e.target.value)} options={[{ value: '', label: 'Nothing (not a link)' }, ...screens.filter((s) => s.id !== current).map((s) => ({ value: s.id, label: s.title }))]} />
+          {target.goto && (
+            <Button variant="ghost" size="sm" icon={Unlink} onClick={() => onLink('')}>
+              Remove link
+            </Button>
+          )}
+        </div>
+      ) : (
+        <p className="link-empty small">Pick an element on the screen to link it.</p>
+      )}
+      <h4 className="mini">Links on this screen</h4>
+      {links.length ? (
+        <ul className="link-list">
+          {links.map((l) => (
+            <li key={l.selector}>
+              <button onClick={() => onPick(l.selector)}>
+                <span className="link-from">{l.text || `<${l.tag}>`}</span>
+                <ArrowRight className="link-arrow" aria-hidden="true" />
+                <span className="link-to">{title(l.goto)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted small">None yet.</p>
+      )}
+    </>
   )
 }
 

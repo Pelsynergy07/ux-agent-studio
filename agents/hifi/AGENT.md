@@ -19,3 +19,6 @@ If no lo-fi is provided, design the screens listed in the flow.
 
 Same output rules as the lo-fi: body HTML only, design-system components only, token-based layout CSS only,
 realistic content, and every component listed in **componentsUsed**.
+
+Keep the prototype working: every `data-goto="<screen id>"` link from the lo-fi stays on the same element,
+so stakeholders can click through the hi-fi exactly as they did the lo-fi.

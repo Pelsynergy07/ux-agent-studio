@@ -10,7 +10,7 @@ import { loadAgent, type AgentDef, type AgentId } from './agents'
 import type { DesignSystem } from './designSystems'
 import type { LLMProvider } from './llm'
 import { caseStudySchema, render, schemas, stageTitle as title, type StageData } from './pipeline'
-import { stripScripts, withFidelity, wrapScreen } from './screens'
+import { prototypeLinks, stripScripts, withFidelity, wrapScreen } from './screens'
 import { slug, type Store } from './store'
 import { isStarted, nextInPipeline, recomputeGates, validatePipeline } from '../shared/pipelineRules'
 import { STAGE_IDS, type AgentEvent, type Comment, type Decision, type Project, type ProjectSummary, type ReviewPayload, type Screen, type StageArtifact, type StageId } from '../shared/types'
@@ -403,8 +403,9 @@ export class Orchestrator {
     const prompt = [
       `# Project\nName: ${p.name}\nDesign system: ${this.ds(p).name}`,
       `# Screen to edit: ${screen.title} (id: ${screen.id})\nPurpose: ${screen.purpose}\n\`\`\`html\n${screen.bodyHtml}\n\`\`\`${screen.css ? `\n\`\`\`css\n${screen.css}\n\`\`\`` : ''}`,
+      `# Other screens (link targets for data-goto)\n${data.screens.filter((x) => x.id !== screen.id).map((x) => `- ${x.id}: ${x.title}`).join('\n') || '(none)'}`,
       `# Change requested by the designer${target}\n${instruction.trim()}`,
-      `# Task\nReturn the revised screen. Change only what was asked; keep everything else, including structure and content, exactly as it is.`,
+      `# Task\nReturn the revised screen. Change only what was asked; keep everything else, including structure and content, exactly as it is. Keep every data-goto prototype link unless the change is about that link; link new navigation elements to the right screen id.`,
     ].join('\n\n')
     try {
       const { data: out, usage } = await this.generate(p, agent, schema, prompt, ctrl.signal, (chars) => emit('progress', `${agent.name} is editing ${screen.title}…`, chars))
@@ -438,7 +439,7 @@ export class Orchestrator {
     const screen = data.screens.find((s) => s.id === screenId)
     if (!screen) throw new Error('Screen not found.')
     const clean = stripScripts(bodyHtml)
-      .replace(/\s(contenteditable|spellcheck)="[^"]*"/gi, '')
+      .replace(/\s(contenteditable|spellcheck|data-uxs-[a-z-]+)(="[^"]*")?(?=[\s>/])/gi, '')
       .replace(/\sclass="([^"]*)"/g, (_, c: string) => {
         const kept = c.split(/\s+/).filter((x) => x && x !== 'hydrated' && !x.startsWith('uxs-'))
         return kept.length ? ` class="${kept.join(' ')}"` : ''
@@ -456,6 +457,11 @@ export class Orchestrator {
         .filter(Boolean)
         .join('\n')
     const diff = lineDiff(text(screen.bodyHtml), text(clean))
+    const titleOf = (sid: string) => data.screens.find((s) => s.id === sid)?.title ?? sid
+    const links = (h: string) => prototypeLinks(h).map((l) => `“${l.label}” → ${titleOf(l.goto)}`)
+    const linkDiff = lineDiff(links(screen.bodyHtml).join('\n'), links(clean).join('\n'))
+    const linkNote = linkDiff.added.length ? `linked ${linkDiff.added[0]}` : linkDiff.removed.length ? `unlinked ${linkDiff.removed[0].replace(/ → .*/, '')}` : ''
+    const textNote = diff.added.length || diff.removed.length ? `text edited (${diff.removed.length ? `“${diff.removed[0]}” → ` : ''}“${diff.added[0] ?? '…'}”)` : ''
     this.d.store.snapshot(id, stage, data)
     this.persist(p, stage, st.version, { ...data, screens: data.screens.map((s) => (s.id === screenId ? { ...s, bodyHtml: clean } : s)) })
     st.edited = true
@@ -465,8 +471,16 @@ export class Orchestrator {
       action: 'edited',
       by: 'designer',
       version: st.version,
-      note: `${screen.title}: text edited (${diff.removed.length ? `“${diff.removed[0]}” → ` : ''}“${diff.added[0] ?? '…'}”)`,
-      details: [`Screen: ${screen.title}`, diff.removed.length ? `Removed:\n${diff.removed.map((l) => `- ${l}`).join('\n')}` : '', diff.added.length ? `Added:\n${diff.added.map((l) => `+ ${l}`).join('\n')}` : ''].filter(Boolean).join('\n\n'),
+      note: `${screen.title}: ${[linkNote, textNote].filter(Boolean).join('; ') || 'markup edited'}`,
+      details: [
+        `Screen: ${screen.title}`,
+        diff.removed.length ? `Removed:\n${diff.removed.map((l) => `- ${l}`).join('\n')}` : '',
+        diff.added.length ? `Added:\n${diff.added.map((l) => `+ ${l}`).join('\n')}` : '',
+        linkDiff.removed.length ? `Links removed:\n${linkDiff.removed.map((l) => `- ${l}`).join('\n')}` : '',
+        linkDiff.added.length ? `Links added:\n${linkDiff.added.map((l) => `+ ${l}`).join('\n')}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
     })
     return this.artifact(id, stage)!
   }

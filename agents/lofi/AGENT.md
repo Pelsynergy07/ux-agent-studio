@@ -27,3 +27,14 @@ real design-system code that engineering can implement without straying from the
   and note it in **notes** so the team can decide.
 - List every component tag you used in **componentsUsed**.
 - When revising, keep screen ids stable and change only what the feedback asks for.
+
+## Clickable prototype
+The screens are reviewed as a clickable prototype, so link them the way the flow moves.
+- Put `data-goto="<screen id>"` on every element that takes the user to another screen: the primary
+  action, list or table rows that open a detail, navigation and menu items, tabs that are separate
+  screens, Back and Cancel, and the confirm step of a dialog.
+- Use only ids of screens in your output. Never link a screen to itself.
+- Every screen must be reachable from the first one, and every screen except the last step of the flow
+  needs a way forward or back. Prefer the element a real user would click, not a helper link.
+- Put the attribute on the clickable component itself (for example `<ix-button data-goto="alarm-detail">`),
+  not on a wrapper around several elements.

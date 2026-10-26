@@ -6,7 +6,7 @@ transcript: true
 design_system: none
 # Model routing: first available wins. Why: everything downstream inherits this phase's accuracy. Faithful extraction plus requirements reasoning needs the strongest model; high effort.
 models: [claude-opus-5.5, claude-sonnet-5.5, gpt-5.5]
-effort: high
+effort: xhigh
 ---
 
 # Analyst

@@ -14,6 +14,17 @@ export function stripScripts(html: string): string {
     .replace(/javascript:/gi, '')
 }
 
+/** Prototype links in screen HTML: elements with data-goto="<screen id>", labelled by their text or label attribute. */
+export function prototypeLinks(html: string): { label: string; goto: string }[] {
+  const out: { label: string; goto: string }[] = []
+  for (const m of html.matchAll(/<([a-z][\w-]*)\b([^>]*\sdata-goto="([^"]*)"[^>]*)>([^<]*)/gi)) {
+    const attr = (n: string) => new RegExp(`\\s${n}="([^"]*)"`).exec(m[2])?.[1]
+    const label = (attr('label') ?? attr('aria-label') ?? attr('header-title') ?? m[4]).trim().replace(/\s+/g, ' ') || m[1].toLowerCase()
+    out.push({ label: label.slice(0, 60), goto: m[3] })
+  }
+  return out
+}
+
 export function wrapScreen(ds: DesignSystem, fidelity: Fidelity, title: string, body: string, css: string): string {
   return `<!doctype html>
 <html lang="en" ${ds.htmlAttrs} data-uxs-fidelity="${fidelity}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">

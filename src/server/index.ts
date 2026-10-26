@@ -235,7 +235,7 @@ async function readBody(req: http.IncomingMessage): Promise<unknown[]> {
 }
 
 /** Serves a file under `base`; screen HTML gets local asset URLs, a fidelity switch and optional annotation. */
-function serveFile(res: http.ServerResponse, base: string, rel: string, opts?: { fidelity?: string | null; annotate?: boolean; edit?: boolean }) {
+function serveFile(res: http.ServerResponse, base: string, rel: string, opts?: { fidelity?: string | null; annotate?: boolean; edit?: boolean; proto?: boolean; link?: boolean }) {
   const file = path.resolve(base, rel)
   if (!file.startsWith(path.resolve(base) + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return send(res, 404, 'Not found', 'text/plain')
   const type = TYPES[path.extname(file)] ?? 'application/octet-stream'
@@ -244,6 +244,8 @@ function serveFile(res: http.ServerResponse, base: string, rel: string, opts?: {
     html = orch.screenHtml(html, opts?.fidelity ?? undefined)
     if (opts?.annotate) html = html.replace('</body>', `<script>${ANNOTATE_SCRIPT}</script></body>`)
     if (opts?.edit) html = html.replace('</body>', `<script>${EDIT_SCRIPT}</script></body>`)
+    if (opts?.proto) html = html.replace('</body>', `<script>${PROTO_SCRIPT}</script></body>`)
+    if (opts?.link) html = html.replace('</body>', `<script>${LINK_SCRIPT}</script></body>`)
     res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' })
     return res.end(html)
   }
@@ -269,6 +271,29 @@ const hasText=[...el.childNodes].some(n=>n.nodeType===3&&n.textContent.trim());
 if(!hasText&&host){const attrs={};ATTRS.forEach(a=>{if(host.hasAttribute(a))attrs[a]=host.getAttribute(a)});parent.postMessage({type:'uxs-attrs',selector:sel(host),tag:host.tagName.toLowerCase(),attrs},'*');return}
 if(!hasText)return;el.setAttribute('contenteditable','true');el.setAttribute('data-uxs-editing','');el.focus();el.addEventListener('blur',()=>{el.removeAttribute('contenteditable');el.removeAttribute('data-uxs-editing');send()},{once:true});el.addEventListener('keydown',k=>{if(k.key==='Enter'&&!k.shiftKey){k.preventDefault();el.blur()}})},true)})()`
 
+// Prototype: elements with data-goto="<screen id>" move to that screen (the parent swaps the frame).
+// Clicking anywhere else briefly shows what is clickable, as in Figma.
+const PROTO_SCRIPT = `(()=>{const st=document.createElement('style');st.textContent='[data-goto]{cursor:pointer}html.uxs-flash [data-goto],html.uxs-hot [data-goto]{outline:2px solid rgba(0,133,126,.85)!important;outline-offset:2px;transition:outline-color .2s}';document.head.appendChild(st);
+let t;document.addEventListener('click',e=>{const a=e.target.closest&&e.target.closest('[data-goto]');if(a){e.preventDefault();e.stopPropagation();parent.postMessage({type:'uxs-goto',screen:a.getAttribute('data-goto')},'*');return}
+if(e.target.closest&&e.target.closest('a[href]'))e.preventDefault();const h=document.documentElement;h.classList.add('uxs-flash');clearTimeout(t);t=setTimeout(()=>h.classList.remove('uxs-flash'),700)},true);
+document.addEventListener('submit',e=>e.preventDefault(),true);
+window.addEventListener('message',e=>{if(e.data&&e.data.type==='uxs-hotspots')document.documentElement.classList.toggle('uxs-hot',!!e.data.on)});
+parent.postMessage({type:'uxs-proto-ready',links:document.querySelectorAll('[data-goto]').length},'*')})()`
+
+// Link mode (studio): pick a clickable element, choose where it goes. Saves through the same path as text edits.
+const LINK_SCRIPT = `(()=>{const PICK='button,a,[role=button],[role=link],[role=tab],[role=menuitem],tr,li,ix-button,ix-icon-button,ix-icon-toggle-button,ix-menu-item,ix-tab-item,ix-card,ix-action-card,ix-push-card,ix-dropdown-item,ix-link-button,ix-breadcrumb-item,ix-pill,ix-chip,ix-tile,ix-event-list-item,ix-key-value,ix-split-button';
+const sel=(el)=>{const p=[];while(el&&el.nodeType===1&&el!==document.body){let s=el.tagName.toLowerCase();const sib=el.parentElement?[...el.parentElement.children].filter(c=>c.tagName===el.tagName):[];if(sib.length>1)s+=':nth-of-type('+(sib.indexOf(el)+1)+')';p.unshift(s);el=el.parentElement}return 'body > '+p.join(' > ')};
+const label=(el)=>(el.getAttribute('label')||el.getAttribute('aria-label')||el.getAttribute('header-title')||el.innerText||el.textContent||el.tagName.toLowerCase()).trim().replace(/\\s+/g,' ').slice(0,80);
+const st=document.createElement('style');st.textContent='[data-goto]{outline:2px solid rgba(0,133,126,.85)!important;outline-offset:2px}.uxs-hover{outline:2px dashed #2c5a85!important;outline-offset:2px;cursor:pointer!important}[data-uxs-picked]{outline:3px solid #2c5a85!important;outline-offset:3px}';document.head.appendChild(st);
+const target=(el)=>(el&&el.closest&&el.closest(PICK))||el;
+const list=()=>[...document.querySelectorAll('[data-goto]')].map(el=>({selector:sel(el),tag:el.tagName.toLowerCase(),text:label(el),goto:el.getAttribute('data-goto')}));
+const send=()=>{const c=document.body.cloneNode(true);c.querySelectorAll('script,style').forEach(n=>n.remove());c.querySelectorAll('[data-uxs-picked]').forEach(n=>n.removeAttribute('data-uxs-picked'));c.querySelectorAll('.uxs-hover').forEach(n=>n.classList.remove('uxs-hover'));parent.postMessage({type:'uxs-edit',html:c.innerHTML},'*')};
+let last;document.addEventListener('mouseover',e=>{last&&last.classList.remove('uxs-hover');last=target(e.target);last&&last.classList&&last.classList.add('uxs-hover')},true);
+document.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();const el=target(e.target);if(!el||el===document.body)return;document.querySelectorAll('[data-uxs-picked]').forEach(n=>n.removeAttribute('data-uxs-picked'));el.setAttribute('data-uxs-picked','');parent.postMessage({type:'uxs-link-pick',element:{selector:sel(el),tag:el.tagName.toLowerCase(),text:label(el),goto:el.getAttribute('data-goto')||''}},'*')},true);
+window.addEventListener('message',e=>{const d=e.data;if(!d)return;if(d.type==='uxs-set-link'){const el=document.querySelector(d.selector);if(!el)return;d.screen?el.setAttribute('data-goto',d.screen):el.removeAttribute('data-goto');send();parent.postMessage({type:'uxs-links',links:list()},'*')}
+if(d.type==='uxs-pick-selector'){const el=document.querySelector(d.selector);if(el)el.dispatchEvent(new MouseEvent('click',{bubbles:true}))}});
+parent.postMessage({type:'uxs-links',links:list()},'*')})()`
+
 let vite: { middlewares: http.RequestListener } | null = null
 
 // Screens are agent-generated HTML, so they are served from a separate origin (PORT + 1). They can
@@ -287,8 +312,9 @@ const preview = http.createServer((req, res) => {
         const rv = p?.review
         if (!p || p.id !== projectId || !rv || rest.slice(0, 4).join('/') !== `stages/${rv.stage}/screens/v${rv.version}`) return send(res, 403, 'Forbidden', 'text/plain')
       }
-      // Text editing is a designer-only power: never for remote (stakeholder) requests.
-      return serveFile(res, store.dir(projectId), rest.join('/'), { fidelity: url.searchParams.get('fidelity'), annotate: url.searchParams.get('annotate') === '1', edit: isLocal(req) && url.searchParams.get('edit') === '1' })
+      // Text and link editing are designer-only powers: never for remote (stakeholder) requests.
+      const q = (k: string) => url.searchParams.get(k) === '1'
+      return serveFile(res, store.dir(projectId), rest.join('/'), { fidelity: url.searchParams.get('fidelity'), annotate: q('annotate'), edit: isLocal(req) && q('edit'), proto: q('proto'), link: isLocal(req) && q('link') })
     }
     if (parts[0] === 'vendor' && parts[1] === 'ix') return serveFile(res, ixDist, parts.slice(2).join('/'))
     if (parts[0] === 'vendor' && parts[1] === 'ix-icons') return serveFile(res, ixIconsRoot, parts.slice(2).join('/'))
