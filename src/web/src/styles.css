@@ -343,7 +343,7 @@ input.input, select.input { height: 36px; }
 .pcard-name { font-weight: 600; font-size: 15px; letter-spacing: -0.018em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pcard-next { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pcard-meta { display: flex; align-items: center; gap: 14px; flex: none; }
-.pcard-progress { width: 56px; height: 4px; border-radius: 4px; background: var(--subtle-2); overflow: hidden; }
+.pcard-progress { flex: none; width: 56px; height: 4px; border-radius: 4px; background: var(--subtle-2); overflow: hidden; }
 .pcard-progress span { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
 .pcard-time { font-family: var(--mono); font-size: 11.5px; color: var(--muted); min-width: 64px; text-align: right; }
 .pcard-arrow { color: var(--faint); transition: transform .2s var(--ease), color .2s; }
@@ -733,6 +733,9 @@ html.theme-fade *, html.theme-fade *::before, html.theme-fade *::after { transit
 @media (max-width: 900px) {
   .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--bg-side); }
+  .topbar .row { flex-wrap: nowrap; gap: 4px; }
+  .topbar .brand { min-width: 0; }
+  .brand-name { white-space: nowrap; }
   .sidebar { position: fixed; inset: 0 auto 0 0; width: min(280px, 86vw); z-index: 1000; transform: translateX(-102%); transition: transform .35s var(--spring); box-shadow: var(--shadow-3); }
   .nav-open .sidebar { transform: none; }
   .nav-open .nav-scrim { display: block; position: fixed; inset: 0; z-index: 999; background: rgba(10, 12, 11, .32); animation: fadein .2s both; }
@@ -755,6 +758,7 @@ html.theme-fade *, html.theme-fade *::before, html.theme-fade *::after { transit
 }
 @media (max-width: 640px) {
   .grid2 { grid-template-columns: 1fr; }
+  .topbar .brand-tag { display: none; }
   .stats-grid { grid-template-columns: 1fr 1fr; }
   .ob-tile { width: 64px; }
   .ob-tile:not(:last-child)::after { display: none; }
