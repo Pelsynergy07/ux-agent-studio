@@ -1,4 +1,4 @@
-import { Check, Info, Link2, Lock, RotateCcw, Send, Share2, Sparkles, Undo2, X } from 'lucide-react'
+import { Check, ChevronRight, Info, Link2, Lock, RotateCcw, Send, Share2, Sparkles, Undo2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { AgentInfo, Comment, Decision, Project, ServerInfo, StageArtifact, StageMeta, StageStatus } from '../../../shared/types'
 import { api } from '../api'
@@ -321,14 +321,17 @@ export function PhasePanel({ project, meta, stages, agent, progress, comments, d
               {pending.length > 0 && (
                 <details className="pending" open={pending.length <= 3}>
                   <summary>
+                    <ChevronRight aria-hidden="true" />
                     {pending.length} comment{pending.length > 1 ? 's' : ''} will be included
                   </summary>
-                  {pending.map((c) => (
-                    <div key={c.id} className="pending-item">
-                      <span className="pending-anchor">{c.anchor}</span>
-                      <CommentRow c={c} onDelete={() => ctx?.removeComment(c.id)} />
-                    </div>
-                  ))}
+                  <div className="pending-list">
+                    {pending.map((c) => (
+                      <div key={c.id} className="pending-item">
+                        <span className="pending-anchor">{c.anchor}</span>
+                        <CommentRow c={c} onDelete={() => ctx?.removeComment(c.id)} />
+                      </div>
+                    ))}
+                  </div>
                 </details>
               )}
               <textarea className="input" autoFocus rows={3} placeholder={pending.length ? 'Anything else? (optional)' : 'Be specific. You can also comment on individual items first.'} value={text} onChange={(e) => setText(e.target.value)} />

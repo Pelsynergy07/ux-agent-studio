@@ -1,4 +1,4 @@
-import { Download, FileText, GitBranch, History, MoreHorizontal, NotebookPen, FolderOpen, Trash2 } from 'lucide-react'
+import { Download, FileText, GitBranch, MoreHorizontal, ScrollText, NotebookPen, FolderOpen, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { isStarted } from '../../../shared/pipelineRules'
 import type { AgentInfo, Comment, Decision, DesignSystemInfo, Project, ServerInfo, StageId, StageMeta } from '../../../shared/types'
@@ -81,8 +81,8 @@ export function ProjectView({ project, stage, setStage, decisions, stages, agent
         back={{ label: 'Projects', onClick: onBack }}
         actions={
           <>
-            <Button variant="ghost" icon={History} onClick={() => setHistoryOpen(true)}>
-              History{steering ? <span className="count">{steering}</span> : null}
+            <Button variant="secondary" icon={ScrollText} onClick={() => setHistoryOpen(true)}>
+              Decision log{steering ? <span className="count">{steering}</span> : null}
             </Button>
             <Menu
               trigger={(toggle) => <IconButton icon={MoreHorizontal} label="Project actions" variant="secondary" onClick={toggle} />}

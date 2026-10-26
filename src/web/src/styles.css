@@ -500,10 +500,15 @@ input.input, select.input { height: 36px; }
 .gate { position: sticky; bottom: 12px; margin: 0 12px 12px; border: 1px solid var(--line-2); border-radius: 14px; background: color-mix(in srgb, var(--surface) 84%, transparent); backdrop-filter: blur(16px) saturate(1.5); -webkit-backdrop-filter: blur(16px) saturate(1.5); box-shadow: var(--shadow-3); padding: 8px 8px 8px 16px; z-index: 5; animation: rise .4s var(--spring) both; }
 .gate-row { display: flex; align-items: center; gap: 8px; }
 .gate-q { flex: 1; min-width: 0; font-weight: 600; font-size: 14px; letter-spacing: -0.012em; }
-.gate.open { padding: 14px 16px; }
+/* Expanded, it's a form: solid, so the page behind doesn't bleed into the text. */
+.gate.open { padding: 14px 16px; background: var(--surface); backdrop-filter: none; -webkit-backdrop-filter: none; }
 .gate-panel { display: flex; flex-direction: column; gap: 10px; animation: fadeup .25s var(--ease) both; }
 .gate-panel strong { font-weight: 600; letter-spacing: -0.012em; }
-.pending summary { cursor: pointer; font-size: 13px; color: var(--accent); }
+.pending summary { cursor: pointer; font-size: 13px; color: var(--accent); list-style: none; display: inline-flex; align-items: center; gap: 4px; }
+.pending summary::-webkit-details-marker { display: none; }
+.pending summary svg.lucide { width: 14px; height: 14px; transition: transform .2s var(--ease); }
+.pending[open] summary svg.lucide { transform: rotate(90deg); }
+.pending-list { max-height: min(320px, 40vh); overflow-y: auto; margin-top: 4px; padding-right: 4px; }
 .pending-item { margin: 8px 0 0 12px; }
 .pending-anchor { font-size: 12px; color: var(--muted); }
 

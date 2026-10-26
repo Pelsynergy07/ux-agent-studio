@@ -1,6 +1,6 @@
 // First-run tutorial, written for designers who have never used an agent tool.
 // Opens by itself on first launch; the ? button in the top bar reopens it any time.
-import { ArrowLeft, ArrowRight, BarChart3, Bot, Check, FileText, History, KeyRound, LayoutTemplate, Link2, MessageSquare, MonitorPlay, PenLine, Sparkles, Users, Workflow, X, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ArrowRight, BarChart3, Bot, Check, FileText, KeyRound, LayoutTemplate, Link2, ScrollText, MessageSquare, MonitorPlay, PenLine, Sparkles, Users, Workflow, X, type LucideIcon } from 'lucide-react'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { AuthInfo } from '../../../shared/types'
@@ -85,11 +85,11 @@ export function Onboarding({ auth, onAuth, sharingAvailable, onClose, onNewProje
       id: 'share',
       icon: Link2,
       title: 'Share for sign-off, keep the story',
-      body: 'Share a link so stakeholders can comment and sign off. Every decision, piece of feedback and edit is saved in History, at the top right of each project: handy for case studies.',
+      body: 'Share a link so stakeholders can comment and sign off. Every decision, piece of feedback and edit is saved in the Decision log, at the top right of each project: handy for case studies.',
       art: [
         { icon: Link2, label: 'Share' },
         { icon: Check, label: 'Sign-off' },
-        { icon: History, label: 'History' },
+        { icon: ScrollText, label: 'Decision log' },
       ],
       focus: 1,
     },
