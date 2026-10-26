@@ -223,11 +223,11 @@ export function PhasePanel({ project, meta, stages, agent, progress, comments, d
           title={st.status === 'error' ? 'That didn’t work' : 'Ready when you are'}
           action={
             <Button variant="primary" icon={st.status === 'error' ? RotateCcw : Sparkles} onClick={() => act(() => api.runStage(project.id, meta.id))}>
-              {st.status === 'error' ? 'Try again' : `Start ${meta.title}`}
+              {st.status === 'error' ? 'Try again' : `Start phase ${index + 1}`}
             </Button>
           }
         >
-          {st.status === 'error' ? (st.error ?? 'The agent failed.') : `${agent?.name ?? 'An agent'} drafts this from what you’ve approved so far. Usually under a minute.`}
+          {st.status === 'error' ? (st.error ?? 'The agent failed.') : `${agent?.name ?? 'An agent'} drafts this from ${index === 0 ? 'the meeting transcript' : 'what you’ve approved so far'}. Usually under a minute.`}
         </EmptyState>
       )}
 
