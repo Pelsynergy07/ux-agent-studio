@@ -1,5 +1,5 @@
 ---
-name: Analyst
+name: Analyser
 description: Turns the meeting transcript into a faithful brief and a lean set of requirements.
 inputs: []
 transcript: true

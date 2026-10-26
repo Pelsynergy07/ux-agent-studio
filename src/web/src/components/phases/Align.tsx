@@ -169,7 +169,7 @@ function PersonQuestions({ person, qs, openCount, startOpen, projectName, childr
             setTimeout(() => setCopied(false), 2000)
           }}
         >
-          {copied ? 'Copied' : `Copy as a message to ${person.split(' ')[0]}`}
+          {copied ? 'Copied' : 'Copy questions as a message'}
         </Button>
       </div>
       {children}

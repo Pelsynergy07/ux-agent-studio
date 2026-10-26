@@ -6,7 +6,7 @@ import { DotWave, burst, useThinking } from '../delight'
 import { Button, IconButton } from '../kit/Button'
 import { Badge, Banner, EmptyState, type Tone } from '../kit/Feedback'
 import { cleanError, duration, Popover, setPath } from '../ui'
-import { CommentRow, Phase, type PhaseCtx } from './editors'
+import { Phase, type PhaseCtx } from './editors'
 import { Align } from './phases/Align'
 import { Shape } from './phases/Shape'
 import { Understand } from './phases/Understand'
@@ -143,7 +143,7 @@ export function PhasePanel({ project, meta, stages, agent, progress, comments, d
             {STATUS[st.status].label}
           </Badge>
           {st.version > 0 && (
-            <Popover align="right" trigger={(toggle) => <IconButton icon={Info} label="Details" badge={servedOther || undefined} onClick={toggle} />}>
+            <Popover align="right" trigger={(toggle) => <IconButton icon={Info} label={servedOther ? 'Details: Copilot used a different model' : 'Details'} badge={servedOther || undefined} onClick={toggle} />}>
               {() => (
                 <div className="details">
                   <dl>
@@ -328,7 +328,12 @@ export function PhasePanel({ project, meta, stages, agent, progress, comments, d
                     {pending.map((c) => (
                       <div key={c.id} className="pending-item">
                         <span className="pending-anchor">{c.anchor}</span>
-                        <CommentRow c={c} onDelete={() => ctx?.removeComment(c.id)} />
+                        <p className="pending-text">
+                          {c.by === 'stakeholder' && <span className="tag">{c.author}</span>} {c.text}
+                        </p>
+                        <button type="button" className="link" onClick={() => ctx?.removeComment(c.id)}>
+                          Remove
+                        </button>
                       </div>
                     ))}
                   </div>

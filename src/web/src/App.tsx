@@ -36,6 +36,8 @@ export function App() {
   useEffect(() => watchSystemTheme(() => theme), [theme])
 
   const loadProjects = useCallback(() => api.listProjects().then(setProjects), [])
+  // Agents can be edited on the Agents page; Settings and new projects must show the saved version.
+  const loadAgents = useCallback(() => api.getAgents().then(setAgents), [])
   const loadProject = useCallback(async (id: string) => {
     const [p, d] = await Promise.all([api.getProject(id), api.getDecisions(id)])
     setProject(p)
@@ -45,7 +47,7 @@ export function App() {
 
   useEffect(() => {
     api.getStages().then(setStages)
-    api.getAgents().then(setAgents)
+    void loadAgents()
     api.getDesignSystems().then(setDesignSystems)
     api.getSettings().then((s) => {
       setSettings(s)
@@ -55,7 +57,7 @@ export function App() {
     api.getServerInfo().then(setServer)
     api.getAuth().then(setAuth)
     void loadProjects()
-  }, [loadProjects])
+  }, [loadProjects, loadAgents])
 
   // The URL keeps the open project and phase, so reloads and back/forward work.
   useEffect(() => {
@@ -184,7 +186,7 @@ export function App() {
           </div>
         )}
         {page === 'agents' ? (
-          <Agents stages={stages} />
+          <Agents stages={stages} onChange={loadAgents} />
         ) : project && stages.length ? (
           <ProjectView
             project={project}

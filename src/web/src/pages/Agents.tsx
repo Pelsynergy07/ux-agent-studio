@@ -18,10 +18,13 @@ function AgentIcon({ id }: { id: string }) {
 
 type Sel = { kind: 'agent'; id: string } | { kind: 'shared' } | { kind: 'pack'; id: string | null }
 
-export function Agents({ stages }: { stages: StageMeta[] }) {
+export function Agents({ stages, onChange }: { stages: StageMeta[]; onChange: () => void }) {
   const [data, setData] = useState<{ agents: AgentDetails[]; shared: string; packs: InstructionPack[] } | null>(null)
   const [sel, setSel] = useState<Sel>({ kind: 'agent', id: 'understand' })
-  const load = () => api.getAgentDetails().then(setData)
+  const load = async () => {
+    setData(await api.getAgentDetails())
+    onChange()
+  }
   useEffect(() => {
     void load()
   }, [])

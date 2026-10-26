@@ -480,9 +480,10 @@ input.input, select.input { height: 36px; }
 
 /* screen viewer */
 .viewer { display: flex; flex-direction: column; gap: 12px; }
-.viewer-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
-.viewer-bar .tabs { flex: 1; min-width: 200px; margin-bottom: -1px; }
-.viewer-tools { display: flex; align-items: center; gap: 6px; padding-bottom: 6px; }
+.viewer-bar { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
+/* Tabs keep their full labels; the tools wrap to their own line when space runs out. */
+.viewer-bar .tabs { flex: 1 0 auto; max-width: 100%; border-bottom: 1px solid var(--line); }
+.viewer-tools { display: flex; align-items: center; gap: 6px; padding-bottom: 6px; margin-left: auto; }
 .viewer-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
 .viewer-body.with-panel { grid-template-columns: minmax(0, 1fr) 280px; }
 .frames { display: grid; gap: 10px; }
@@ -509,8 +510,12 @@ input.input, select.input { height: 36px; }
 .pending summary svg.lucide { width: 14px; height: 14px; transition: transform .2s var(--ease); }
 .pending[open] summary svg.lucide { transform: rotate(90deg); }
 .pending-list { max-height: min(320px, 40vh); overflow-y: auto; margin-top: 4px; padding-right: 4px; }
-.pending-item { margin: 8px 0 0 12px; }
-.pending-anchor { font-size: 12px; color: var(--muted); }
+.pending-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 10px 0 10px 18px; border-top: 1px solid var(--line); }
+.pending-item:first-child { border-top: 0; }
+.pending-anchor { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pending-text { grid-column: 1; font-size: 13.5px; color: var(--ink-2); line-height: 1.5; }
+.pending-item .link { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+.pending-text .tag { margin-right: 4px; }
 
 /* ---------- drawer, modal, toast ---------- */
 .drawer-scrim, .scrim { position: fixed; inset: 0; background: rgba(10, 12, 11, .32); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); animation: fadein .2s ease both; }
