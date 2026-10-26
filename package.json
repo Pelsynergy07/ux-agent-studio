@@ -1,0 +1,46 @@
+{
+  "name": "ux-agent-studio",
+  "productName": "UX Agent Studio",
+  "version": "0.1.0",
+  "description": "Agentic UX pipeline on localhost: meeting transcript → understand → align → shape → design-system lo-fi → stakeholder sign-off, with a human gate at every phase.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "vite build && rolldown -c rolldown.config.mjs",
+    "start": "node out/server.mjs",
+    "start:lan": "node out/server.mjs --lan",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:logic": "rolldown scripts/logic-test.ts --platform node --format esm --file out/logic-test.mjs --external zod --external @github/copilot-sdk >/dev/null && node out/logic-test.mjs",
+    "smoke": "rolldown scripts/smoke.ts --platform node --format esm --file out/smoke.mjs --external @github/copilot-sdk --external zod >/dev/null && node out/smoke.mjs",
+    "mcp": "node out/mcp-server.mjs",
+    "gen:ix": "node scripts/gen-ix-catalog.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/geist-mono": "^5.3.0",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@github/copilot-sdk": "1.0.25",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@siemens/ix": "5.3.0",
+    "@siemens/ix-icons": "3.7.0",
+    "lucide-react": "^1.61.0",
+    "vite": "8.3.5",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "dompurify": "3.4.17",
+    "marked": "18.1.1",
+    "mermaid": "12.2.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "rolldown": "1.2.15",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}

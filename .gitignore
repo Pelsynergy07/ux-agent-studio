@@ -1,0 +1,7 @@
+.smoke-projects/
+node_modules/
+out/
+dist/
+.DS_Store
+agents/.history/
+*.log
