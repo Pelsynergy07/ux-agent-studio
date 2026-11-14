@@ -1,10 +1,11 @@
-import { Download, FileText, GitBranch, MoreHorizontal, ScrollText, NotebookPen, FolderOpen, Trash2 } from 'lucide-react'
+import { BookOpen, Download, FileText, GitBranch, MoreHorizontal, ScrollText, NotebookPen, FolderOpen, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { isStarted } from '../../../shared/pipelineRules'
 import type { AgentInfo, Comment, Decision, DesignSystemInfo, Project, ServerInfo, StageId, StageMeta } from '../../../shared/types'
 import { api } from '../api'
 import { DecisionLog } from '../components/DecisionLog'
 import { PageHead } from '../components/PageHead'
+import { ContextPanel } from '../components/ContextPanel'
 import { PhasePanel } from '../components/PhasePanel'
 import { PipelineEditor } from '../components/PipelineEditor'
 import { burst } from '../delight'
@@ -14,10 +15,13 @@ import { cleanError, duration, Modal } from '../ui'
 
 type Progress = Record<string, { message: string; chars?: number; startedAt: number }>
 
+/** A project's tabs: its knowledge base, then its phases. */
+export type View = StageId | 'context'
+
 interface Props {
   project: Project
-  stage: StageId
-  setStage: (s: StageId) => void
+  stage: View
+  setStage: (s: View) => void
   decisions: Decision[]
   stages: StageMeta[]
   agents: AgentInfo[]
@@ -36,7 +40,7 @@ export function ProjectView({ project, stage, setStage, decisions, stages, agent
   const [comments, setComments] = useState<Comment[]>([])
   const [dialog, setDialog] = useState<'pipeline' | 'transcript' | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
-  const meta = stages.find((s) => s.id === stage)!
+  const meta = stages.find((s) => s.id === stage)
   const loadComments = () => api.getComments(project.id).then(setComments)
   useEffect(() => {
     void loadComments()
@@ -130,10 +134,16 @@ export function ProjectView({ project, stage, setStage, decisions, stages, agent
 
       <Stepper
         current={stage}
-        onSelect={(id) => setStage(id as StageId)}
-        steps={project.pipeline.map((id) => ({ id, title: stages.find((x) => x.id === id)?.title ?? id, state: project.stages[id].status, hint: HINT[project.stages[id].status] }))}
+        onSelect={(id) => setStage(id as View)}
+        steps={[
+          { id: 'context', title: 'Context', state: 'ready', hint: 'Notes and files the agents read', icon: BookOpen, extra: true },
+          ...project.pipeline.map((id) => ({ id, title: stages.find((x) => x.id === id)?.title ?? id, state: project.stages[id].status, hint: HINT[project.stages[id].status] })),
+        ]}
       />
 
+      {stage === 'context' || !meta ? (
+        <ContextPanel project={project} onChange={onChange} onGo={setStage} toast={toast} />
+      ) : (
       <PhasePanel
         key={`${project.id}/${stage}`}
         project={project}
@@ -146,9 +156,11 @@ export function ProjectView({ project, stage, setStage, decisions, stages, agent
         server={server}
         onChange={onChange}
         onCommentsChange={loadComments}
+        onGo={setStage}
       />
+      )}
 
-      <DecisionLog projectId={project.id} stage={stage} decisions={decisions} stages={stages} open={historyOpen} onClose={() => setHistoryOpen(false)} onChange={onChange} />
+      <DecisionLog projectId={project.id} stage={meta?.id ?? 'understand'} decisions={decisions} stages={stages} open={historyOpen} onClose={() => setHistoryOpen(false)} onChange={onChange} />
       {dialog === 'pipeline' && <PipelineDialog project={project} stages={stages} agents={agents} onClose={() => setDialog(null)} onSaved={() => (setDialog(null), onChange())} />}
       {dialog === 'transcript' && <TranscriptDialog id={project.id} onClose={() => setDialog(null)} />}
     </div>

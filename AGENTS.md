@@ -9,7 +9,7 @@ transcript into a lo-fi that stakeholders sign off, fast. It works through a **g
 phase, and a designer approves, edits or sends it back before the next phase unlocks.
 
 ```
-transcript → Understand → Align (designer records answers) → Shape → Lo-fi → stakeholder sign-off → (Hi-fi) → case study export
+transcript + Context → Understand → Align (agent answers from context, designer fills the rest and confirms core flows) → Shape (flow canvas) → Lo-fi → stakeholder sign-off → (Hi-fi) → case study export
 ```
 Each project picks its phases (presets: Standard, Fast concept, Through hi-fi) and a design system.
 Lo-fi and hi-fi screens are real design-system markup (Siemens iX), shown in a greyscale wireframe theme for lo-fi.
@@ -19,6 +19,7 @@ Lo-fi and hi-fi screens are real design-system markup (Siemens iX), shown in a g
 |---|---|
 | `src/core/orchestrator.ts` | Deterministic state machine: run, approve, request changes (merging targeted comments), reopen, structured edits (field-level diffs), single-screen edits (studio), direct text edits, stakeholder review, case study, export, decision log. |
 | `src/core/pipeline.ts` | Per-phase **zod output schema**, phase metadata and the Markdown renderer (Markdown is what downstream agents and exports read). |
+| `src/core/context.ts` | Knowledge-base retrieval: whole sources when small, otherwise BM25-ranked passages for the phase. Runs before the prompt, so agents still get no tools. |
 | `src/core/agents.ts` | Loads `agents/<id>/AGENT.md` (frontmatter + prompt), prepends `agents/_shared.md`, and appends enabled packs from `agents/_custom/`. Also saves edits from the Agents page, with backups in `agents/.history/`. |
 | `src/core/designSystems.ts` | Registry of `design-systems/<id>/`: `DESIGN_SYSTEM.md` (rules, sent to designing agents) + `components.md` (catalog, sent to screen agents). Generates the iX wireframe theme from iX's own tokens. |
 | `src/core/screens.ts` | Wraps agent HTML into standalone documents, strips scripts and switches fidelity. |
@@ -26,7 +27,7 @@ Lo-fi and hi-fi screens are real design-system markup (Siemens iX), shown in a g
 | `src/core/store.ts` | File-based project memory (layout below). Shared with the MCP server. Skips project folders it can't read (older versions, damaged files) without touching them. |
 | `src/core/metrics.ts` | Usage counts derived from project memory, for the designer's stats and optional anonymous sharing. Numbers and fixed ids only. |
 | `src/server/index.ts` | HTTP server: designer API (`/api/*`, this machine only), live events (SSE), stakeholder review API (`/review-api/<token>/*`), and a **separate preview origin on PORT+1** that serves screens. |
-| `src/web/` | React UI: home, project view (phase bar, phase panel, gate), Studio (edit, text, comment, present), Agents page, stakeholder review page. The tool uses its own small kit (`src/web/src/kit/`, Inter, Lucide icons, light and dark tokens in `styles.css`), not iX: only generated screens follow the design system. |
+| `src/web/` | React UI: home, project view (Context tab, phase bar, phase panel, gate, Shape flow canvas in `FlowCanvas.tsx` on React Flow + dagre), Studio (edit, text, comment, present), Agents page, stakeholder review page. The tool uses its own small kit (`src/web/src/kit/`, Inter, Lucide icons, light and dark tokens in `styles.css`), not iX: only generated screens follow the design system. |
 | `src/mcp/server.ts` | Read-only stdio MCP server over project memory (`out/mcp-server.mjs`). |
 | `scripts/launch.mjs` | One-click start used by `Start UX Agent Studio.command` (Mac) and `.bat` (Windows): checks Node, installs, rebuilds when the source changed, starts or reopens the app. |
 | `telemetry/` | Optional Cloudflare Worker that collects anonymous usage snapshots. The endpoint goes in `telemetry.json`; empty means nothing is sent. |
@@ -43,7 +44,9 @@ Lo-fi and hi-fi screens are real design-system markup (Siemens iX), shown in a g
                    stages/<phase>/v<N>.json      structured output per version
                    stages/<phase>/current.md     Markdown rendered from the current data
                    stages/<phase>/edits/*.json   data replaced by hand edits
+                   context/sources.json          knowledge base: notes and files agents read
                    stages/align/answers.json
+                   stages/align/answer-sources.json   where agent-filled answers came from
                    stages/{lofi,hifi}/screens/v<N>/<id>.html
                    exports/case-study.json
 ```

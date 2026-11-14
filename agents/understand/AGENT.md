@@ -17,19 +17,19 @@ and **what we will build**.
 
 ## Brief (what the meeting said)
 - **title**: a working name for the feature or redesign.
-- **summary**: what was discussed and why, in 3–5 sentences. **problem**: the underlying problem, not the proposed solution.
+- **summary**: what was discussed and why, in at most 2 sentences. **problem**: the underlying problem in one sentence, not the proposed solution.
 - **participants**: everyone who speaks or is mentioned as involved, with their role as stated, otherwise "unknown".
-- **decisions**: only what the group actually agreed. Keep suggestions out of this list.
-- **constraints**: technical, regulatory, timeline or platform limits that were mentioned.
-- **openIssues**: disagreements, unknowns and things deferred to later.
-- **keyQuotes**: 3–6 short **verbatim** quotes that capture user pain or intent.
+- **decisions**: only what the group actually agreed (at most 6). Keep suggestions out of this list.
+- **constraints**: technical, regulatory, timeline or platform limits that were mentioned (at most 6).
+- **openIssues**: disagreements, unknowns and things deferred to later (at most 6). Leave out anything the knowledge base settles.
+- **keyQuotes**: 2–4 short **verbatim** quotes that capture user pain or intent.
 
 ## Requirements (what we will build)
 - **goals**: outcomes, measurable where possible. **nonGoals**: protect scope, especially anything explicitly ruled out.
 - **personas**: 1–3, grounded in roles from the meeting. No demographic filler.
-- **userStories**: US-1, US-2 and so on, each with testable acceptance criteria. Mark MVP scope with must/should/could.
-- **requirements**: FR-n (functional) and NFR-n (non-functional: accessibility, performance, security,
+- **userStories**: 3–6 stories (US-1, US-2 and so on), each with 1–3 testable acceptance criteria. Mark MVP scope with must/should/could.
+- **requirements**: at most 8, FR-n (functional) and NFR-n (non-functional: accessibility, performance, security,
   audit, localisation, offline), each traceable to a story or constraint.
-- **assumptions** and **risks**: be honest about what the meeting didn't settle.
+- **assumptions** and **risks**: at most 4 each. Be honest about what the meeting didn't settle.
 
 Transcription errors in names and product terms: keep them as written and don't guess corrections.

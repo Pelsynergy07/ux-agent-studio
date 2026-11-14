@@ -95,7 +95,7 @@ export type StepState = 'locked' | 'ready' | 'running' | 'review' | 'approved' |
  * The phase bar: phases as segments of one track, with a raised pill that slides to the current one.
  * One small glyph per phase says where it stands; a hairline underneath fills as phases are approved.
  */
-export function Stepper({ steps, current, onSelect }: { steps: { id: string; title: string; state: StepState; hint: string }[]; current: string; onSelect: (id: string) => void }) {
+export function Stepper({ steps, current, onSelect }: { steps: { id: string; title: string; state: StepState; hint: string; icon?: LucideIcon; extra?: boolean }[]; current: string; onSelect: (id: string) => void }) {
   const ref = useRef<HTMLDivElement>(null)
   const [pill, setPill] = useState({ left: 0, width: 0, ready: false })
   useLayoutEffect(() => {
@@ -108,23 +108,25 @@ export function Stepper({ steps, current, onSelect }: { steps: { id: string; tit
     if (ref.current) ro.observe(ref.current)
     return () => ro.disconnect()
   }, [current, steps.length])
-  const done = steps.filter((s) => s.state === 'approved').length
+  // Extra tabs (like Context) sit in the bar but aren't phases, so they don't count as progress.
+  const phases = steps.filter((s) => !s.extra)
+  const done = phases.filter((s) => s.state === 'approved').length
   return (
     <nav className="phasebar" aria-label="Phases">
       <div className="phasebar-track" ref={ref} role="tablist">
         <span className={`phasebar-pill ${pill.ready ? 'ready' : ''}`} style={{ transform: `translateX(${pill.left}px)`, width: pill.width }} aria-hidden="true" />
         {steps.map((s) => (
-          <button key={s.id} type="button" role="tab" aria-selected={s.id === current} aria-current={s.id === current ? 'step' : undefined} className={`pb-item st-${s.state}`} title={s.hint} onClick={() => onSelect(s.id)}>
+          <button key={s.id} type="button" role="tab" aria-selected={s.id === current} aria-current={s.id === current ? 'step' : undefined} className={`pb-item st-${s.state} ${s.extra ? 'pb-extra' : ''}`} title={s.hint} onClick={() => onSelect(s.id)}>
             <span className="pb-glyph" aria-hidden="true">
-              {s.state === 'approved' ? <Check /> : s.state === 'running' ? <Spinner size={14} /> : s.state === 'locked' ? <Lock /> : s.state === 'error' ? <AlertCircle /> : <i />}
+              {s.icon ? <s.icon /> : s.state === 'approved' ? <Check /> : s.state === 'running' ? <Spinner size={14} /> : s.state === 'locked' ? <Lock /> : s.state === 'error' ? <AlertCircle /> : <i />}
             </span>
             <span className="pb-name">{s.title}</span>
             {s.state === 'review' && <span className="pb-flag">Review</span>}
           </button>
         ))}
       </div>
-      <span className="phasebar-progress" aria-label={`${done} of ${steps.length} phases approved`}>
-        <span style={{ width: `${(done / steps.length) * 100}%` }} />
+      <span className="phasebar-progress" aria-label={`${done} of ${phases.length} phases approved`}>
+        <span style={{ width: `${(done / Math.max(phases.length, 1)) * 100}%` }} />
       </span>
     </nav>
   )

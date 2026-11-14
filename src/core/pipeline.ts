@@ -3,29 +3,32 @@
 // from it and is what downstream agents and exports read. Prompts live in agents/<id>/AGENT.md.
 
 import { z } from 'zod'
+import { effectiveAnswer } from '../shared/pipelineRules'
 import type { StageId, StageMeta } from '../shared/types'
 
 const str = z.string()
 const list = z.array(z.string())
 const id = str.describe('Short stable id, e.g. US-1, Q3, K2, S4')
 
+const short = (what: string) => str.describe(`${what}. One short line, at most 15 words.`)
+
 export const schemas = {
   understand: z.object({
-    title: str.describe('Working title for the feature or redesign'),
-    summary: str.describe('3-5 sentences: what the meeting was about and why'),
-    problem: str.describe('The user/business problem in plain words, not the solution'),
+    title: str.describe('Working title for the feature or redesign, at most 6 words'),
+    summary: str.describe('What the meeting was about and why, at most 2 sentences'),
+    problem: str.describe('The user/business problem in plain words, not the solution. One sentence, at most 25 words.'),
     participants: z.array(z.object({ name: str, role: str.describe('Role if stated, else "unknown"') })),
-    decisions: list.describe('Only things the group actually agreed on'),
-    constraints: list,
-    openIssues: list,
-    keyQuotes: z.array(z.object({ speaker: str, quote: str.describe('Verbatim') })),
-    goals: list.describe('Outcome-oriented, measurable where possible'),
-    nonGoals: list,
-    personas: z.array(z.object({ name: str, description: str, needs: list })),
+    decisions: z.array(short('Something the group actually agreed on')),
+    constraints: z.array(short('A limit that was mentioned')),
+    openIssues: z.array(short('Something unresolved')),
+    keyQuotes: z.array(z.object({ speaker: str, quote: str.describe('Verbatim, short') })).describe('At most 4'),
+    goals: z.array(short('An outcome, measurable where possible')),
+    nonGoals: z.array(short('Explicitly out of scope')),
+    personas: z.array(z.object({ name: str, description: short('Who they are'), needs: z.array(short('A need')) })),
     userStories: z.array(z.object({ id, story: str.describe('As a <persona>, I want <goal> so that <benefit>'), acceptance: list, priority: z.enum(['must', 'should', 'could']) })),
-    requirements: z.array(z.object({ id, requirement: str, kind: z.enum(['functional', 'non-functional']) })),
-    assumptions: list,
-    risks: list,
+    requirements: z.array(z.object({ id, requirement: short('The requirement'), kind: z.enum(['functional', 'non-functional']) })),
+    assumptions: z.array(short('An assumption')),
+    risks: z.array(short('A risk')),
   }),
 
   align: z.object({
@@ -36,21 +39,26 @@ export const schemas = {
         role: str,
         group: z.enum(['decision-maker', 'contributor', 'end-user', 'expert', 'informed']),
         influence: z.enum(['high', 'medium', 'low']),
-        needFromThem: str,
+        needFromThem: short('What we need from them'),
         evidence: str.describe('Where they come from in the inputs, or "inferred"'),
       }),
     ),
-    gaps: list.describe('Roles that should be involved but were not mentioned'),
+    gaps: z.array(short('A role that should be involved but was not mentioned')),
     questions: z.array(
       z.object({
         id,
         stakeholder: str.describe('Who should answer: a stakeholder name from the list'),
-        question: str,
-        why: str.describe('Which design decision this unblocks'),
+        question: str.describe('One short, neutral question, at most 20 words'),
+        why: short('The design decision this unblocks'),
         priority: z.enum(['blocking', 'important', 'nice-to-have']),
+        answer: str.describe('The answer if the transcript or the designer\'s context already settles it, in one or two short sentences; empty string if not'),
+        source: str.describe('Where the answer was found: "Transcript" or the context source title; empty string if unanswered'),
       }),
     ),
-    northStar: z.object({ name: str, definition: str, why: str }),
+    coreFlows: z
+      .array(z.object({ id: str.describe('F1, F2…'), name: str.describe('Verb phrase, at most 6 words, e.g. "Triage a critical alarm"'), goal: short('What the user achieves') }))
+      .describe('The 2-4 core user flows the Shape phase should design'),
+    northStar: z.object({ name: str, definition: short('Definition'), why: short('Why it captures the value') }),
     kpis: z.array(
       z.object({
         id,
@@ -63,28 +71,42 @@ export const schemas = {
         linkedGoal: str,
       }),
     ),
-    guardrails: list.describe('Metrics that must not get worse'),
+    guardrails: z.array(short('A metric that must not get worse')),
   }),
 
   shape: z.object({
-    summary: str,
-    entryPoints: list,
-    mermaid: str.describe('Mermaid "flowchart TD" of the main flow incl. decisions and error paths. No code fences.'),
-    steps: z.array(z.object({ id, screen: str, userAction: str, systemResponse: str })),
-    edgeCases: z.array(z.object({ id, case: str, handling: str })),
+    summary: str.describe('The flow in one or two sentences'),
+    flows: z
+      .array(
+        z.object({
+          id: str.describe('Same id as the core flow, e.g. F1'),
+          name: str,
+          nodes: z.array(
+            z.object({
+              id: str.describe('Short id unique within the flow, e.g. n1'),
+              label: str.describe('At most 6 words'),
+              kind: z.enum(['start', 'screen', 'action', 'decision', 'end', 'error']),
+              screen: str.describe('Screen id from the screens list when kind is "screen", otherwise empty string'),
+            }),
+          ),
+          edges: z.array(z.object({ from: str, to: str, label: str.describe('Short condition or action, or empty string') })),
+        }),
+      )
+      .describe('One graph per core flow, 5-12 nodes each: the happy path plus key decisions and error exits'),
+    edgeCases: z.array(z.object({ id, case: short('When this happens'), handling: short('We handle it by') })),
     screens: z
-      .array(z.object({ id: str.describe('kebab-case slug'), name: str, purpose: str, keyComponents: list.describe('Design-system components this screen will use') }))
+      .array(z.object({ id: str.describe('kebab-case slug'), name: str, purpose: short('What it is for'), keyComponents: list.describe('Design-system components this screen will use') }))
       .describe('The distinct screens the lo-fi will draw'),
-    kpiHooks: list.describe('Where in the flow each KPI is measured, e.g. "K1: time from alarm list open to first acknowledge"'),
+    kpiHooks: z.array(short('Where a KPI is measured, e.g. "K1: alarm list open to first acknowledge"')),
   }),
 
   lofi: z.object({
-    notes: str,
+    notes: str.describe('At most 2 sentences'),
     screens: z.array(
       z.object({
         id: str.describe('kebab-case slug matching the flow screen id'),
         title: str,
-        purpose: str,
+        purpose: short('What the screen is for'),
         bodyHtml: str.describe('Screen body built ONLY from the design system components. No <html>, <head>, <script>. Clickable elements that move to another screen carry data-goto="<screen id>".'),
         css: str.describe('Layout-only CSS using design-system tokens; empty string if none'),
       }),
@@ -93,7 +115,7 @@ export const schemas = {
   }),
 
   hifi: z.object({
-    notes: str,
+    notes: str.describe('At most 2 sentences'),
     screens: z.array(
       z.object({
         id: str.describe('Same id as the lo-fi screen'),
@@ -107,6 +129,41 @@ export const schemas = {
   }),
 } satisfies Record<StageId, z.ZodType>
 
+/**
+ * Brings data written by older versions up to the current schema (fields added since get empty
+ * defaults), so old projects still open, edit and approve.
+ */
+export function migrate(stage: StageId, data: unknown): unknown {
+  if (!data || typeof data !== 'object') return data
+  const d = { ...(data as Record<string, unknown>) }
+  if (stage === 'align') {
+    d.questions = ((d.questions as Record<string, unknown>[]) ?? []).map((q) => ({ answer: '', source: '', ...q }))
+    d.coreFlows ??= []
+  }
+  if (stage === 'shape') {
+    d.flows ??= []
+    d.kpiHooks ??= []
+  }
+  return d
+}
+
+export type FlowGraph = StageData<'shape'>['flows'][number]
+
+/** Mermaid text for a flow graph: compact for downstream agents and exports. */
+export function flowToMermaid(f: FlowGraph): string {
+  const q = (s: string) => s.replace(/"/g, "'")
+  const ids = new Map(f.nodes.map((n, i) => [n.id, `${f.id.replace(/\W/g, '')}_${i}`]))
+  const shape = (n: FlowGraph['nodes'][number]) => {
+    const l = q(n.label)
+    return n.kind === 'decision' ? `{"${l}"}` : n.kind === 'start' || n.kind === 'end' ? `(["${l}"])` : n.kind === 'screen' ? `["${l}"]` : `("${l}")`
+  }
+  return [
+    'flowchart LR',
+    ...f.nodes.map((n) => `  ${ids.get(n.id)}${shape(n)}`),
+    ...f.edges.filter((e) => ids.has(e.from) && ids.has(e.to)).map((e) => `  ${ids.get(e.from)} -->${e.label ? `|"${q(e.label)}"|` : ''} ${ids.get(e.to)}`),
+  ].join('\n')
+}
+
 export const caseStudySchema = z.object({
   title: str,
   tldr: str,
@@ -116,11 +173,11 @@ export const caseStudySchema = z.object({
 export type StageData<S extends StageId> = z.infer<(typeof schemas)[S]>
 
 export const STAGES: StageMeta[] = [
-  { id: 'understand', title: 'Understand', short: 'Understand', summary: 'Brief and requirements from the meeting', gate: 'Is this the problem we were asked to solve?' },
-  { id: 'align', title: 'Align', short: 'Align', summary: 'Stakeholders, open questions and success KPIs', gate: 'Answer what you can, then approve to shape the flow.' },
-  { id: 'shape', title: 'Shape', short: 'Shape', summary: 'UX flow, edge cases and screen list', gate: 'Approve the flow before any screens are drawn.' },
-  { id: 'lofi', title: 'Lo-fi', short: 'Lo-fi', summary: 'Wireframes from real design-system components', gate: 'Approve, or share with stakeholders for sign-off.' },
-  { id: 'hifi', title: 'Hi-fi', short: 'Hi-fi', summary: 'Polished final UI in full theme', gate: 'Approve the final UI.' },
+  { id: 'understand', title: 'Understand', short: 'Understand', summary: 'Brief from the meeting', gate: 'Right problem?' },
+  { id: 'align', title: 'Align', short: 'Align', summary: 'Questions, flows and KPIs', gate: 'Ready to shape?' },
+  { id: 'shape', title: 'Shape', short: 'Shape', summary: 'User flows and screens', gate: 'Flow looks right?' },
+  { id: 'lofi', title: 'Lo-fi', short: 'Lo-fi', summary: 'Clickable wireframes', gate: 'Ready to share?' },
+  { id: 'hifi', title: 'Hi-fi', short: 'Hi-fi', summary: 'Final UI', gate: 'Final UI approved?' },
 ]
 export const stageTitle = (s: StageId | 'casestudy') => (s === 'casestudy' ? 'Case study' : STAGES.find((x) => x.id === s)!.title)
 
@@ -177,8 +234,13 @@ export function render(stage: StageId, data: unknown, extra?: { answers?: Record
         bullets(d.gaps),
         `## Open questions and answers`,
         d.questions
-          .map((q) => `**${q.id} · ${q.question}** _(ask ${q.stakeholder}, ${q.priority})_\nWhy: ${q.why}\nAnswer: ${answers[q.id]?.trim() || '_Unanswered_'}`)
+          .map((q) => {
+            const a = effectiveAnswer(q, answers)
+            return `**${q.id} · ${q.question}** _(ask ${q.stakeholder}, ${q.priority})_\nWhy: ${q.why}\nAnswer: ${a ? `${a}${!(q.id in answers) && q.source ? ` _(from ${q.source})_` : ''}` : '_Unanswered_'}`
+          })
           .join('\n\n') || '_None_',
+        `## Core flows to design`,
+        bullets((d.coreFlows ?? []).map((f) => `**${f.id} ${f.name}** — ${f.goal}`)),
         `## North star: ${d.northStar.name}`,
         `${d.northStar.definition}\n\nWhy: ${d.northStar.why}`,
         `## KPIs`,
@@ -188,22 +250,22 @@ export function render(stage: StageId, data: unknown, extra?: { answers?: Record
       ].join('\n\n')
     }
     case 'shape': {
-      const d = data as StageData<'shape'>
+      const d = data as StageData<'shape'> & { mermaid?: string; entryPoints?: string[]; steps?: { id: string; screen: string; userAction: string; systemResponse: string }[] }
       return [
         `# UX flow`,
         d.summary,
-        `## Entry points`,
-        bullets(d.entryPoints),
-        `## Flow diagram`,
-        '```mermaid\n' + d.mermaid.replace(/^```(mermaid)?\s*|```\s*$/g, '').trim() + '\n```',
-        `## Steps`,
-        table(['#', 'Screen', 'User action', 'System response'], d.steps.map((s) => [s.id, s.screen, s.userAction, s.systemResponse])),
+        ...(d.flows?.length
+          ? d.flows.flatMap((f) => [`## Flow ${f.id}: ${f.name}`, '```mermaid\n' + flowToMermaid(f) + '\n```'])
+          : d.mermaid
+            ? [`## Flow diagram`, '```mermaid\n' + d.mermaid.replace(/^```(mermaid)?\s*|```\s*$/g, '').trim() + '\n```']
+            : []),
+        ...(d.steps?.length ? [`## Steps`, table(['#', 'Screen', 'User action', 'System response'], d.steps.map((s) => [s.id, s.screen, s.userAction, s.systemResponse]))] : []),
         `## Edge cases`,
         bullets(d.edgeCases.map((e) => `**${e.id} ${e.case}** → ${e.handling}`)),
         `## Screens`,
         bullets(d.screens.map((s) => `**${s.name}** (\`${s.id}\`) — ${s.purpose}${s.keyComponents.length ? ` · ${s.keyComponents.join(', ')}` : ''}`)),
         `## Where KPIs are measured`,
-        bullets(d.kpiHooks),
+        bullets(d.kpiHooks ?? []),
       ].join('\n\n')
     }
     case 'lofi':

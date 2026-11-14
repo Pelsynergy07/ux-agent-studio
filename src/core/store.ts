@@ -8,13 +8,15 @@
 //   stages/<phase>/v<N>.json         structured output per version (designer edits update the current one)
 //   stages/<phase>/current.md        Markdown rendered from the current data (what downstream agents read)
 //   stages/<phase>/edits/<time>.json data a designer replaced by hand
-//   stages/align/answers.json        stakeholder answers recorded by the designer
+//   stages/align/answers.json        answers to the open questions (designer, or an agent from context)
+//   stages/align/answer-sources.json where agent-filled answers came from
+//   context/sources.json             the project's knowledge base: notes and files agents read
 //   stages/<phase>/screens/v<N>/<id>.html   lo-fi / hi-fi screens per version (kept for comparison)
 //   exports/case-study.json          optional case study
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { STAGE_IDS, type Comment, type Decision, type Project, type StageId, type StageState } from '../shared/types'
+import { STAGE_IDS, type Comment, type ContextSource, type Decision, type Project, type StageId, type StageState } from '../shared/types'
 
 export class Store {
   constructor(public readonly root: string) {
@@ -116,6 +118,26 @@ export class Store {
   writeAnswers(id: string, answers: Record<string, string>): void {
     fs.mkdirSync(this.stageDir(id, 'align'), { recursive: true })
     fs.writeFileSync(path.join(this.stageDir(id, 'align'), 'answers.json'), JSON.stringify(answers, null, 2))
+  }
+
+  answerSources(id: string): Record<string, string> {
+    const f = path.join(this.stageDir(id, 'align'), 'answer-sources.json')
+    return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {}
+  }
+
+  writeAnswerSources(id: string, sources: Record<string, string>): void {
+    fs.mkdirSync(this.stageDir(id, 'align'), { recursive: true })
+    fs.writeFileSync(path.join(this.stageDir(id, 'align'), 'answer-sources.json'), JSON.stringify(sources, null, 2))
+  }
+
+  sources(id: string): ContextSource[] {
+    const f = path.join(this.dir(id), 'context', 'sources.json')
+    return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : []
+  }
+
+  writeSources(id: string, sources: ContextSource[]): void {
+    fs.mkdirSync(path.join(this.dir(id), 'context'), { recursive: true })
+    fs.writeFileSync(path.join(this.dir(id), 'context', 'sources.json'), JSON.stringify(sources, null, 2))
   }
 
   screensDir(id: string, stage: StageId, version: number): string {

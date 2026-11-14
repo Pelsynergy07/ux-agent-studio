@@ -3,6 +3,9 @@
 
 import { STAGE_IDS, type Project, type StageId, type StageState } from './types'
 
+/** Align: a recorded answer wins (even when cleared on purpose); otherwise the one the agent found. */
+export const effectiveAnswer = (q: { id: string; answer?: string }, answers: Record<string, string>) => ((q.id in answers ? answers[q.id] : q.answer) ?? '').trim()
+
 /** A stage counts as started once an agent has produced something for it or is running it. */
 export const isStarted = (st: StageState) => st.version > 0 || st.status === 'running'
 

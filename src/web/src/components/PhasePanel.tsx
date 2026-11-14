@@ -12,6 +12,7 @@ import { Shape } from './phases/Shape'
 import { Understand } from './phases/Understand'
 import { ScreenViewer } from './ScreenViewer'
 import { Studio } from './Studio'
+import type { View } from '../pages/ProjectView'
 
 interface Props {
   project: Project
@@ -24,6 +25,7 @@ interface Props {
   server: ServerInfo | null
   onChange: () => void
   onCommentsChange: () => void
+  onGo: (v: View) => void
 }
 
 const STATUS: Record<StageStatus, { label: string; tone: Tone }> = {
@@ -35,7 +37,7 @@ const STATUS: Record<StageStatus, { label: string; tone: Tone }> = {
   error: { label: 'Failed', tone: 'danger' },
 }
 
-export function PhasePanel({ project, meta, stages, agent, progress, comments, decisions, server, onChange, onCommentsChange }: Props) {
+export function PhasePanel({ project, meta, stages, agent, progress, comments, decisions, server, onChange, onCommentsChange, onGo }: Props) {
   const st = project.stages[meta.id]
   const [artifact, setArtifact] = useState<StageArtifact | null>(null)
   const [previous, setPrevious] = useState<StageArtifact | null>(null)
@@ -132,9 +134,6 @@ export function PhasePanel({ project, meta, stages, agent, progress, comments, d
     <section className="phase" aria-label={meta.title}>
       <header className="phase-head">
         <div className="phase-title">
-          <span className="eyebrow">
-            Phase {index + 1} of {project.pipeline.length}
-          </span>
           <h2>{meta.title}</h2>
           <p className="phase-sub">{meta.summary}</p>
         </div>
@@ -227,7 +226,7 @@ export function PhasePanel({ project, meta, stages, agent, progress, comments, d
             </Button>
           }
         >
-          {st.status === 'error' ? (st.error ?? 'The agent failed.') : `${agent?.name ?? 'An agent'} drafts this from ${index === 0 ? 'the meeting transcript' : 'what you’ve approved so far'}. Usually under a minute.`}
+          {st.status === 'error' ? (st.error ?? 'The agent failed.') : `${agent?.name ?? 'An agent'} drafts it from ${index === 0 ? 'the transcript and your context' : 'what you’ve approved and your context'}.`}
         </EmptyState>
       )}
 
@@ -257,7 +256,15 @@ export function PhasePanel({ project, meta, stages, agent, progress, comments, d
             {meta.id === 'align' && (
               <Align
                 answers={artifact.answers ?? {}}
+                answerSources={artifact.answerSources ?? {}}
                 projectName={project.name}
+                onGo={onGo}
+                onFill={async (notes) => {
+                  const { artifact: a, filled } = await api.answerFromContext(project.id, notes)
+                  setArtifact(a)
+                  onChange()
+                  return filled
+                }}
                 onAnswers={async (a) => {
                   try {
                     setArtifact(await api.saveAnswers(project.id, a))

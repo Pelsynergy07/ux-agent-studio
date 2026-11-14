@@ -40,7 +40,7 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
 }
 
 /** A popover anchored below its trigger; closes on outside click or Escape. */
-export function Popover({ trigger, children, align = 'left' }: { trigger: (open: () => void, isOpen: boolean) => ReactNode; children: (close: () => void) => ReactNode; align?: 'left' | 'right' }) {
+export function Popover({ trigger, children, align = 'left', up }: { trigger: (open: () => void, isOpen: boolean) => ReactNode; children: (close: () => void) => ReactNode; align?: 'left' | 'right'; up?: boolean }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLSpanElement>(null)
   useEffect(() => {
@@ -54,7 +54,7 @@ export function Popover({ trigger, children, align = 'left' }: { trigger: (open:
   return (
     <span className="pop-anchor" ref={ref}>
       {trigger(() => setOpen((o) => !o), open)}
-      {open && <div className={`popover ${align}`}>{children(() => setOpen(false))}</div>}
+      {open && <div className={`popover ${align} ${up ? 'up' : ''}`}>{children(() => setOpen(false))}</div>}
     </span>
   )
 }

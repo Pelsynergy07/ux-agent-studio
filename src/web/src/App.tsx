@@ -9,7 +9,7 @@ import { Onboarding } from './components/Onboarding'
 import { Agents } from './pages/Agents'
 import { Home } from './pages/Home'
 import { NewProject } from './pages/NewProject'
-import { ProjectView } from './pages/ProjectView'
+import { ProjectView, type View } from './pages/ProjectView'
 import { Settings } from './pages/Settings'
 import { readTheme, switchTheme, watchSystemTheme, type ThemePref } from './theme'
 import { Toast } from './ui'
@@ -25,7 +25,7 @@ export function App() {
   const [auth, setAuth] = useState<AuthInfo | null>(null)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [project, setProject] = useState<Project | null>(null)
-  const [stage, setStage] = useState<StageId>('understand')
+  const [stage, setStage] = useState<View>('understand')
   const [decisions, setDecisions] = useState<Decision[]>([])
   const [progress, setProgress] = useState<Progress>({})
   const [toast, setToast] = useState<string | null>(null)
@@ -66,7 +66,7 @@ export function App() {
       setPage(location.hash.startsWith('#/agents') ? 'agents' : 'projects')
       const h = /^#\/p\/([a-z0-9-]+)(?:\/(\w+))?/.exec(location.hash)
       if (!h) return setProject(null)
-      void loadProject(h[1]).then((p) => setStage(h[2] && p.pipeline.includes(h[2] as StageId) ? (h[2] as StageId) : focusStage(p)))
+      void loadProject(h[1]).then((p) => setStage(h[2] === 'context' ? 'context' : h[2] && p.pipeline.includes(h[2] as StageId) ? (h[2] as StageId) : focusStage(p)))
     }
     route()
     window.addEventListener('hashchange', route)
@@ -91,7 +91,7 @@ export function App() {
     location.hash = ''
     void loadProjects()
   }
-  const goStage = (s: StageId) => {
+  const goStage = (s: View) => {
     setStage(s)
     if (project) history.replaceState(null, '', `#/p/${project.id}/${s}`)
   }
@@ -190,7 +190,7 @@ export function App() {
         ) : project && stages.length ? (
           <ProjectView
             project={project}
-            stage={project.pipeline.includes(stage) ? stage : project.pipeline[0]}
+            stage={stage === 'context' || project.pipeline.includes(stage) ? stage : project.pipeline[0]}
             setStage={goStage}
             decisions={decisions}
             stages={stages}

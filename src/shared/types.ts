@@ -60,6 +60,16 @@ export interface Project {
   signedOffAt?: string
 }
 
+/** A note or file in the project's knowledge base. Agents get the parts relevant to their phase. */
+export interface ContextSource {
+  id: string
+  title: string
+  kind: 'note' | 'file'
+  text: string
+  addedAt: string
+  words: number
+}
+
 export interface StakeholderReview {
   token: string
   stage: StageId
@@ -101,6 +111,8 @@ export interface StageArtifact {
   screens?: Screen[]
   /** Align phase: the designer's recorded answers keyed by question id. */
   answers?: Record<string, string>
+  /** Align phase: where an answer came from when an agent filled it (e.g. "Your context: Ops notes"). */
+  answerSources?: Record<string, string>
 }
 
 /** Targeted feedback: anchored to an item in a phase's output or an element on a screen. */
@@ -189,6 +201,7 @@ export type DecisionAction =
   | 'stakeholder_verdict' // a stakeholder approved or asked for changes
   | 'signed_off' // the lo-fi got stakeholder sign-off
   | 'note' // a decision or direction change logged by the designer
+  | 'context' // a note or file added to (or removed from) the project's knowledge base
   | 'exported'
   | 'cancelled'
   | 'error'
@@ -332,6 +345,12 @@ export interface UxsApi {
   reopenStage(id: string, stage: StageId, reason?: string): Promise<Project>
   saveData(id: string, stage: StageId, data: unknown): Promise<StageArtifact>
   saveAnswers(id: string, answers: Record<string, string>): Promise<StageArtifact>
+  /** Knowledge base: notes and files agents read. */
+  getContext(id: string): Promise<ContextSource[]>
+  addContext(id: string, source: { title?: string; text: string; kind: ContextSource['kind'] }): Promise<ContextSource[]>
+  deleteContext(id: string, sourceId: string): Promise<ContextSource[]>
+  /** Align: an agent fills open questions from the knowledge base (and optional new notes, saved to it first). */
+  answerFromContext(id: string, notes?: string): Promise<{ artifact: StageArtifact; filled: number }>
   /** Studio: revise one screen from an instruction (runs in the background; progress via events). */
   editScreen(id: string, stage: StageId, screenId: string, instruction: string, element?: Comment['element']): Promise<void>
   /** Studio: save text edited directly on a screen. */

@@ -1,6 +1,6 @@
 // First-run tutorial, written for designers who have never used an agent tool.
 // Opens by itself on first launch; the ? button in the top bar reopens it any time.
-import { ArrowLeft, ArrowRight, BarChart3, Bot, Check, FileText, KeyRound, LayoutTemplate, Link2, ScrollText, MessageSquare, MonitorPlay, PenLine, Sparkles, Users, Workflow, X, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ArrowRight, BarChart3, BookOpen, Bot, Check, FileText, KeyRound, LayoutTemplate, Link2, ScrollText, MessageSquare, MonitorPlay, PenLine, Sparkles, Users, Workflow, X, type LucideIcon } from 'lucide-react'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { AuthInfo } from '../../../shared/types'
@@ -29,7 +29,7 @@ export function Onboarding({ auth, onAuth, sharingAvailable, onClose, onNewProje
       id: 'welcome',
       icon: Sparkles,
       title: 'From meeting to a lo-fi your stakeholders sign off',
-      body: 'Paste the transcript of a kickoff meeting. Specialist agents draft each step of the design work, and you approve every step before the next one starts. Nothing moves on without you.',
+      body: 'Paste a meeting transcript. Agents draft each step; you approve each one before the next starts.',
       art: [
         { icon: FileText, label: 'Transcript' },
         { icon: Bot, label: 'Agents draft' },
@@ -41,14 +41,14 @@ export function Onboarding({ auth, onAuth, sharingAvailable, onClose, onNewProje
       id: 'token',
       icon: KeyRound,
       title: 'Connect GitHub Copilot',
-      body: 'The agents run on GitHub Copilot, using your own Copilot licence. Connect it once with a token and you are set.',
+      body: 'Agents run on your own Copilot licence. Connect it once.',
       extra: <TokenForm auth={auth} onChange={onAuth} compact={!!auth?.ok} />,
     },
     {
       id: 'phases',
       icon: Workflow,
       title: 'Four phases, one at a time',
-      body: 'Understand turns the meeting into a brief. Align lists who to ask what, and success measures. Shape drafts the user flow. Lo-fi builds the screens from real Siemens iX components. The bar at the top of a project shows where you are.',
+      body: 'Understand writes the brief. Align settles open questions and core flows. Shape maps the flows on a canvas. Lo-fi builds clickable iX screens.',
       art: [
         { icon: FileText, label: 'Understand' },
         { icon: Users, label: 'Align' },
@@ -58,10 +58,16 @@ export function Onboarding({ auth, onAuth, sharingAvailable, onClose, onNewProje
       focus: -1,
     },
     {
+      id: 'context',
+      icon: BookOpen,
+      title: 'Tell it what you know',
+      body: 'Drop notes and files in the Context tab. Agents read them and answer most questions themselves, so you only see what’s really open.',
+    },
+    {
       id: 'steer',
       icon: MessageSquare,
       title: 'You steer every step',
-      body: 'Read the draft, then Approve it or Request changes. Click any text to fix it yourself, or use the speech bubble next to an item to tell the agent exactly what to change.',
+      body: 'Approve, or request changes. Click any text to edit it, or comment on an item for the agent.',
       art: [
         { icon: PenLine, label: 'Edit' },
         { icon: MessageSquare, label: 'Comment' },
@@ -73,7 +79,7 @@ export function Onboarding({ auth, onAuth, sharingAvailable, onClose, onNewProje
       id: 'studio',
       icon: MonitorPlay,
       title: 'Refine and present the lo-fi',
-      body: 'Open the studio to change one screen by describing it in plain words, edit labels directly, or present full screen in a meeting and collect comments as people talk.',
+      body: 'Describe a change in plain words, edit labels, link screens, or present full screen.',
       art: [
         { icon: Sparkles, label: 'Describe' },
         { icon: PenLine, label: 'Edit text' },
@@ -85,7 +91,7 @@ export function Onboarding({ auth, onAuth, sharingAvailable, onClose, onNewProje
       id: 'share',
       icon: Link2,
       title: 'Share for sign-off, keep the story',
-      body: 'Share a link so stakeholders can comment and sign off. Every decision, piece of feedback and edit is saved in the Decision log, at the top right of each project: handy for case studies.',
+      body: 'Share a link for comments and sign-off. Every decision is kept in the Decision log.',
       art: [
         { icon: Link2, label: 'Share' },
         { icon: Check, label: 'Sign-off' },
@@ -99,7 +105,7 @@ export function Onboarding({ auth, onAuth, sharingAvailable, onClose, onNewProje
             id: 'sharing',
             icon: BarChart3,
             title: 'Help improve the app',
-            body: 'Share anonymous counts, like how many projects you created and how many revisions it took. Only numbers are sent: never names, transcripts, comments or screens. You can change this any time under your profile.',
+            body: 'Share anonymous counts, like projects and revisions. Only numbers, never content. Change it any time under your profile.',
             extra: <Switch label="Share anonymous usage counts" checked={sharing} onChange={setSharing} />,
           } satisfies Step,
         ]

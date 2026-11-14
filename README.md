@@ -40,6 +40,8 @@ npm start
 The app opens at http://localhost:4317. Without a saved token it uses the GitHub sign-in on the machine (`gh auth login`). `npm run dev` gives hot reload.
 
 ## Highlights
+- **Context tab.** Drop notes and files once; agents read the relevant parts and answer most open questions themselves.
+- **Flow canvas.** Shape draws each core flow on a pannable, zoomable board, like FigJam.
 - **Progressive disclosure.** Each phase shows a short summary. Details sit in collapsed sections and open when you want them.
 - **Targeted feedback.** Comment on any item, or click any element on a screen. Comments go to the agent together with your next revision.
 - **Clickable prototype.** The lo-fi agent links screens the way the flow moves, so designers and stakeholders click through them like a Figma prototype. Fix or add links by hand in the studio's Link mode.

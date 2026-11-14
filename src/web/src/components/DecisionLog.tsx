@@ -24,13 +24,14 @@ const LABEL: Record<Decision['action'], string> = {
   stakeholder_verdict: 'Stakeholder decision',
   signed_off: 'Signed off',
   note: 'Decision',
+  context: 'Context updated',
   exported: 'Exported',
   cancelled: 'Cancelled',
   error: 'Failed',
 }
 
 /** Actions that change direction are shown by default; agent bookkeeping is under "Everything". */
-const STEERING = new Set<Decision['action']>(['created', 'pipeline', 'changes_requested', 'edited', 'answered', 'commented', 'approved', 'reopened', 'shared', 'note', 'stakeholder_verdict', 'signed_off'])
+const STEERING = new Set<Decision['action']>(['created', 'pipeline', 'changes_requested', 'edited', 'answered', 'commented', 'approved', 'reopened', 'shared', 'note', 'context', 'stakeholder_verdict', 'signed_off'])
 type Filter = 'steering' | 'stakeholders' | 'all'
 
 export function DecisionLog({ projectId, stage, decisions, stages, open, onClose, onChange }: { projectId: string; stage: StageId; decisions: Decision[]; stages: StageMeta[]; open: boolean; onClose: () => void; onChange: () => void }) {

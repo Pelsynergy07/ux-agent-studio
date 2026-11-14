@@ -8,6 +8,8 @@ import path from 'node:path'
 import { loadDesignSystems } from '../src/core/designSystems'
 import type { GenerateRequest, GenerateResult, LLMProvider } from '../src/core/llm'
 import { computeMetrics, snapshot } from '../src/core/metrics'
+import { selectContext } from '../src/core/context'
+import { flowToMermaid, migrate } from '../src/core/pipeline'
 import { jsonDiff, Orchestrator } from '../src/core/orchestrator'
 import { Store } from '../src/core/store'
 import { prototypeLinks, stripScripts, withFidelity } from '../src/core/screens'
@@ -22,10 +24,18 @@ const fake: Record<StageId | 'casestudy', unknown> = {
   },
   align: {
     stakeholders: [{ id: 'S1', name: 'Maria', role: 'PO', group: 'decision-maker', influence: 'high', needFromThem: 'Sign-off', evidence: 'brief' }], gaps: [],
-    questions: [{ id: 'Q1', stakeholder: 'Tom', question: 'Peak volume?', why: 'density', priority: 'blocking' }, { id: 'Q2', stakeholder: 'Priya', question: 'Bulk ack allowed?', why: 'scope', priority: 'important' }],
+    questions: [
+      { id: 'Q1', stakeholder: 'Tom', question: 'Peak volume?', why: 'density', priority: 'blocking', answer: '', source: '' },
+      { id: 'Q2', stakeholder: 'Priya', question: 'Bulk ack allowed?', why: 'scope', priority: 'important', answer: '', source: '' },
+      { id: 'Q3', stakeholder: 'Maria', question: 'Shelving in scope?', why: 'scope', priority: 'blocking', answer: 'No, shelving is out of scope.', source: 'Transcript' },
+    ],
+    coreFlows: [{ id: 'F1', name: 'Triage a critical alarm', goal: 'Act on the worst alarm first' }],
     northStar: { name: 'Time to act', definition: 'd', why: 'w' }, kpis: [{ id: 'K1', name: 'TTA', type: 'behavioral', formula: 'f', baseline: 'to be measured', target: '-30%', dataSource: 'telemetry', linkedGoal: 'g' }], guardrails: [],
   },
-  shape: { summary: 'Flow', entryPoints: [], mermaid: 'flowchart TD\nA-->B', steps: [], edgeCases: [], screens: [{ id: 'alarm-list', name: 'Alarm list', purpose: 'p', keyComponents: ['ix-pill'] }], kpiHooks: ['K1: list open → ack'] },
+  shape: {
+    summary: 'Flow',
+    flows: [{ id: 'F1', name: 'Triage a critical alarm', nodes: [{ id: 'n1', label: 'Alarm raised', kind: 'start', screen: '' }, { id: 'n2', label: 'Alarm list', kind: 'screen', screen: 'alarm-list' }, { id: 'n3', label: 'Critical?', kind: 'decision', screen: '' }], edges: [{ from: 'n1', to: 'n2', label: '' }, { from: 'n2', to: 'n3', label: '' }, { from: 'n3', to: 'n1', label: 'No' }] }],
+    edgeCases: [], screens: [{ id: 'alarm-list', name: 'Alarm list', purpose: 'p', keyComponents: ['ix-pill'] }], kpiHooks: ['K1: list open → ack'] },
   lofi: { notes: 'n', componentsUsed: ['ix-application', 'ix-button'], screens: [{ id: 'alarm-list', title: 'Alarm list', purpose: 'p', bodyHtml: '<ix-application><ix-button onclick="x()">Acknowledge</ix-button><script>alert(1)</script></ix-application>', css: '' }] },
   hifi: { notes: 'n', componentsUsed: ['ix-button'], screens: [{ id: 'alarm-list', title: 'Alarm list', purpose: 'p', bodyHtml: '<ix-button>Acknowledge</ix-button>', css: '' }] },
   casestudy: { title: 'CS', tldr: 't', markdown: '## Context\nc' },
@@ -41,6 +51,11 @@ class MockLLM implements LLMProvider {
     return []
   }
   async generate<T>(req: GenerateRequest<T>): Promise<GenerateResult<T>> {
+    if (req.system.includes("match a designer's notes")) {
+      seen.answer = { system: req.system, prompt: req.prompt }
+      const data = req.schema.parse({ answers: [{ id: 'Q2', answer: 'Allowed with a confirm step', source: 'Ops handbook' }, { id: 'Q9', answer: 'not a question', source: 'x' }] })
+      return { data, usage: { requestedModel: req.models[0], model: req.models[0], servedModels: ['mock'], effort: req.effort, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, calls: 1, premiumRequests: 1, durationMs: 1 } }
+    }
     const label = /# Task\nProduce the (.+?) (output )?now/.exec(req.prompt)![1]
     const stage = ({ Understand: 'understand', Align: 'align', Shape: 'shape', 'Lo-fi': 'lofi', 'Hi-fi': 'hifi', 'case study': 'casestudy' } as Record<string, StageId | 'casestudy'>)[label]
     seen[stage] = { system: req.system, prompt: req.prompt }
@@ -83,15 +98,16 @@ await test('locked and skipped phases refuse to run; unknown or unrenderable des
   assert.throws(() => orch.create('x', 't', '', preset('standard'), 'element'), /can't render screens/)
 })
 
-await test('inputs: Understand reads the transcript; Align reads the approved brief instead', async () => {
+await test('inputs: Understand reads the transcript; Align reads the approved brief and the transcript (to answer questions itself)', async () => {
   await orch.run(id, 'understand')
   assert.doesNotMatch(seen.understand.system, /# Design system/)
   assert.match(seen.understand.prompt, /<transcript>/)
   orch.approve(id, 'understand', 'Matches the meeting')
   assert.equal(last(id).details, 'Matches the meeting')
   await orch.run(id, 'align')
-  assert.doesNotMatch(seen.align.prompt, /<transcript>/)
+  assert.match(seen.align.prompt, /<transcript>/)
   assert.match(seen.align.prompt, /<understand>/)
+  assert.match(seen.align.prompt, /# Designer's knowledge base\n[\s\S]*Notes from project setup\nSCADA console/)
 })
 
 await test('answers: each change logged in full, no-op saves log nothing, home shows waiting on stakeholders', () => {
@@ -101,10 +117,52 @@ await test('answers: each change logged in full, no-op saves log nothing, home s
   orch.saveAnswers(id, { Q1: '500 alarms at peak' })
   assert.equal(log(id).length, n)
   assert.match(last(id).details!, /Q1 \(Tom\): Peak volume\?\n→ 500 alarms at peak/)
-  orch.saveAnswers(id, { Q2: 'Allowed with a confirm step' }) // partial save: Q1 must stay answered
-  assert.doesNotMatch(last(id).details!, /cleared|Q1/)
-  assert.equal(store.answers(id).Q1, '500 alarms at peak')
+  // Q3 was answered by the agent from the transcript, so only Q1 was blocking.
   assert.equal(orch.summary(orch.project(id)).state, 'needs-you')
+  assert.match(orch.artifact(id, 'align')!.markdown, /Answer: No, shelving is out of scope\. _\(from Transcript\)_/)
+  assert.equal(store.answers(id).Q1, '500 alarms at peak')
+})
+
+await test('knowledge base: notes logged in full, files by name; agents fill open questions from it, with sources', async () => {
+  const before = orch.context(id).length
+  orch.addContext(id, { text: 'Ops handbook\n\nBulk acknowledge is allowed with a confirm step.', kind: 'note' })
+  assert.equal(orch.context(id).length, before + 1)
+  assert.equal(last(id).action, 'context')
+  assert.match(last(id).details!, /Bulk acknowledge is allowed/)
+  orch.addContext(id, { title: 'big.txt', text: 'x '.repeat(50), kind: 'file' })
+  assert.match(last(id).details!, /^File: big\.txt\n50 words/)
+  const { filled, artifact } = await orch.answerFromContext(id)
+  assert.equal(filled, 1) // Q9 isn't an open question; Q1 and Q3 already have answers
+  assert.match(seen.answer.prompt, /- Q2: Bulk ack allowed\?/)
+  assert.doesNotMatch(seen.answer.prompt, /Q1:|Q3:/)
+  assert.equal(artifact.answers!.Q2, 'Allowed with a confirm step')
+  assert.equal(artifact.answerSources!.Q2, 'Ops handbook')
+  assert.equal(last(id).by, 'agent')
+  // Editing an agent-filled answer makes it the designer's own.
+  orch.saveAnswers(id, { Q2: 'Allowed with a confirm step (Priya)' })
+  assert.equal(orch.artifact(id, 'align')!.answerSources!.Q2, undefined)
+  const big = orch.context(id).find((s) => s.title === 'big.txt')!
+  orch.deleteContext(id, big.id)
+  assert.match(last(id).note!, /Removed file: big\.txt/)
+})
+
+await test('older outputs still open: align questions without answers and shape with a Mermaid chart', () => {
+  const oldAlign = migrate('align', { questions: [{ id: 'Q1', question: 'q' }] }) as { questions: { answer: string }[]; coreFlows: unknown[] }
+  assert.equal(oldAlign.questions[0].answer, '')
+  assert.deepEqual(oldAlign.coreFlows, [])
+  const oldShape = migrate('shape', { summary: 's', mermaid: 'flowchart TD\nA-->B', edgeCases: [], screens: [] }) as { flows: unknown[] }
+  assert.deepEqual(oldShape.flows, [])
+  assert.equal(flowToMermaid({ id: 'F2', name: 'n', nodes: [{ id: 'a', label: 'Say "hi"', kind: 'decision', screen: '' }], edges: [{ from: 'a', to: 'ghost', label: '' }] }), `flowchart LR\n  F2_0{"Say 'hi'"}`)
+})
+
+await test('retrieval: small knowledge bases go in whole; big ones send the passages that match', () => {
+  const src = (title: string, text: string) => ({ id: title, title, kind: 'note' as const, text, addedAt: '', words: 0 })
+  assert.equal(selectContext([src('a', 'short')], 'q').partial, false)
+  const filler = Array.from({ length: 80 }, (_, i) => `Paragraph ${i} about cafeteria menus and parking rules.`.repeat(8)).join('\n\n')
+  const kb = selectContext([src('Handbook', filler + '\n\nAlarm flood: operators see 500 alarms per minute at peak.\n\n' + filler)], 'alarm flood peak volume', 3000)
+  assert.equal(kb.partial, true)
+  assert.match(kb.text, /500 alarms per minute/)
+  assert.ok(kb.text.length < 4000)
 })
 
 await test('structured edits: field-level diff logged, snapshot kept, downstream sees edits and answers', async () => {
@@ -119,6 +177,8 @@ await test('structured edits: field-level diff logged, snapshot kept, downstream
   await orch.run(id, 'shape')
   assert.match(seen.shape.prompt, /Maria Keller/)
   assert.match(seen.shape.prompt, /500 alarms at peak/)
+  assert.match(seen.shape.prompt, /F1 Triage a critical alarm/)
+  assert.match(store.markdown(id, 'shape')!, /flowchart LR\n  F1_0\(\["Alarm raised"\]\)[\s\S]*F1_2 -->\|"No"\| F1_0/)
   assert.match(seen.shape.system, /# Design system: Siemens iX/)
   assert.doesNotMatch(seen.shape.system, /component reference/) // guide only, no catalog
 })

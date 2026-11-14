@@ -77,14 +77,15 @@ export function EText({ path, multiline, placeholder, className }: { path: strin
 }
 
 /** Comment button with a count; the popover shows this item's thread and adds a targeted comment. */
-export function CommentButton({ path, anchor }: { path: string; anchor: string }) {
+export function CommentButton({ path, anchor, align = 'right', up }: { path: string; anchor: string; align?: 'left' | 'right'; up?: boolean }) {
   const { comments, comment, removeComment } = usePhase()
   const mine = comments.filter((c) => c.path === path)
   const open = mine.filter((c) => !c.sentInVersion).length
   const [text, setText] = useState('')
   return (
     <Popover
-      align="right"
+      align={align}
+      up={up}
       trigger={(toggle) => <IconButton icon={MessageSquare} label={open ? `${open} comment${open > 1 ? 's' : ''}` : 'Comment for the agent'} size="sm" badge={open || undefined} className={`cbtn ${open ? 'has' : ''}`} onClick={(e) => (e.stopPropagation(), toggle())} />}
     >
       {(close) => (

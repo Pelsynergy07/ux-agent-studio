@@ -9,11 +9,12 @@ import { z, type ZodType } from 'zod'
 import { loadAgent, type AgentDef, type AgentId } from './agents'
 import type { DesignSystem } from './designSystems'
 import type { LLMProvider } from './llm'
-import { caseStudySchema, render, schemas, stageTitle as title, type StageData } from './pipeline'
+import { CONTEXT_BUDGET, selectContext, wordCount } from './context'
+import { caseStudySchema, migrate, render, schemas, stageTitle as title, type StageData } from './pipeline'
 import { prototypeLinks, stripScripts, withFidelity, wrapScreen } from './screens'
 import { slug, type Store } from './store'
-import { isStarted, nextInPipeline, recomputeGates, validatePipeline } from '../shared/pipelineRules'
-import { STAGE_IDS, type AgentEvent, type Comment, type Decision, type Project, type ProjectSummary, type ReviewPayload, type Screen, type StageArtifact, type StageId } from '../shared/types'
+import { effectiveAnswer, isStarted, nextInPipeline, recomputeGates, validatePipeline } from '../shared/pipelineRules'
+import { STAGE_IDS, type AgentEvent, type Comment, type ContextSource, type Decision, type Project, type ProjectSummary, type ReviewPayload, type Screen, type StageArtifact, type StageId } from '../shared/types'
 
 interface Deps {
   store: Store
@@ -148,9 +149,9 @@ export class Orchestrator {
     if (rv && p.stages[rv.stage].version === rv.version && !rv.verdicts.some((v) => v.at > rv.sharedAt))
       return { ...base, state: 'in-review', next: `${title(rv.stage)} v${rv.version} is with stakeholders` }
     if (p.stages.align.status === 'review') {
-      const data = this.d.store.data<StageData<'align'>>(p.id, 'align', p.stages.align.version)
+      const data = migrate('align', this.d.store.data(p.id, 'align', p.stages.align.version)) as StageData<'align'> | null
       const answers = this.d.store.answers(p.id)
-      const open = data?.questions.filter((q) => q.priority === 'blocking' && !answers[q.id]?.trim()).length ?? 0
+      const open = data?.questions.filter((q) => q.priority === 'blocking' && !effectiveAnswer(q, answers)).length ?? 0
       if (open) return { ...base, state: 'waiting-answers', next: `${open} blocking question${open > 1 ? 's' : ''} waiting on stakeholders` }
     }
     const s = p.pipeline.find((x) => ['review', 'ready', 'error'].includes(p.stages[x].status))
@@ -168,12 +169,12 @@ export class Orchestrator {
     const p = this.project(id)
     const v = version ?? p.stages[stage].version
     if (!v) return null
-    const data = this.d.store.data(id, stage, v)
+    const data = migrate(stage, this.d.store.data(id, stage, v))
     if (!data) return null
     const answers = stage === 'align' ? this.d.store.answers(id) : undefined
     const markdown = v === p.stages[stage].version ? (this.d.store.markdown(id, stage) ?? '') : render(stage, data, { answers })
     const screens = SCREEN_STAGES.includes(stage) ? this.screens(id, stage, v, data as StageData<'lofi'>) : undefined
-    return { stage, version: v, data, markdown, screens, answers }
+    return { stage, version: v, data, markdown, screens, answers, answerSources: stage === 'align' ? this.d.store.answerSources(id) : undefined }
   }
 
   private screens(id: string, stage: StageId, v: number, data: StageData<'lofi'>): Screen[] {
@@ -333,7 +334,7 @@ export class Orchestrator {
     const p = this.project(id)
     if (p.stages[stage].status !== 'review') throw new Error('Only phases in review can be edited.')
     const v = p.stages[stage].version
-    const before = this.d.store.data(id, stage, v)
+    const before = migrate(stage, this.d.store.data(id, stage, v))
     const parsed = schemas[stage].parse(data)
     const changes = jsonDiff(before, parsed)
     if (!changes.length) return this.artifact(id, stage)!
@@ -349,15 +350,20 @@ export class Orchestrator {
     const p = this.project(id)
     const v = p.stages.align.version
     if (p.stages.align.status !== 'review') throw new Error('Align is not in review.')
-    const data = this.d.store.data<StageData<'align'>>(id, 'align', v)
+    const data = migrate('align', this.d.store.data(id, 'align', v)) as StageData<'align'> | null
     if (!data) throw new Error('No questions yet.')
     const before = this.d.store.answers(id)
     // Callers may send only the answers that changed; anything not sent is left as it was.
-    const changed = data.questions.filter((q) => q.id in answers && (answers[q.id] ?? '').trim() !== (before[q.id] ?? '').trim())
+    const changed = data.questions.filter((q) => q.id in answers && (answers[q.id] ?? '').trim() !== effectiveAnswer(q, before))
     if (!changed.length) return this.artifact(id, 'align')!
-    this.d.store.writeAnswers(id, { ...before, ...answers })
-    this.d.store.writeVersion(id, 'align', v, data, render('align', data, { answers: { ...before, ...answers } }))
-    const answered = data.questions.filter((q) => ({ ...before, ...answers })[q.id]?.trim()).length
+    const merged = { ...before, ...answers }
+    this.d.store.writeAnswers(id, merged)
+    // A hand-written answer is the designer's own, no longer the agent's.
+    const sources = this.d.store.answerSources(id)
+    for (const q of changed) delete sources[q.id]
+    this.d.store.writeAnswerSources(id, sources)
+    this.d.store.writeVersion(id, 'align', v, data, render('align', data, { answers: merged }))
+    const answered = data.questions.filter((q) => effectiveAnswer(q, merged)).length
     this.log(id, {
       stage: 'align',
       action: 'answered',
@@ -367,6 +373,102 @@ export class Orchestrator {
       details: changed.map((q) => `${q.id} (${q.stakeholder}): ${q.question}\n→ ${answers[q.id]?.trim() || '(cleared)'}`).join('\n\n'),
     })
     return this.artifact(id, 'align')!
+  }
+
+  // ---------- knowledge base ----------
+
+  /** Notes and files agents read. Context typed when the project was created shows as the first note. */
+  context(id: string): ContextSource[] {
+    const p = this.project(id)
+    const setup: ContextSource[] = p.context.trim() ? [{ id: 'setup', title: 'Notes from project setup', kind: 'note', text: p.context.trim(), addedAt: p.createdAt, words: wordCount(p.context) }] : []
+    return [...setup, ...this.d.store.sources(id)]
+  }
+
+  addContext(id: string, src: { title?: string; text: string; kind: ContextSource['kind'] }): ContextSource[] {
+    const text = src.text.replace(/\r\n/g, '\n').trim()
+    if (!text) throw new Error('Add some text first.')
+    if (text.length > 2_000_000) throw new Error('That file is too big. Paste the parts that matter instead.')
+    const firstLine = text.split('\n')[0].replace(/^#+\s*/, '').trim()
+    const title = (src.title?.trim() || (firstLine.length <= 60 ? firstLine : `${firstLine.slice(0, 57)}…`) || 'Note').slice(0, 120)
+    const source: ContextSource = { id: crypto.randomUUID(), title, kind: src.kind === 'file' ? 'file' : 'note', text, addedAt: now(), words: wordCount(text) }
+    this.d.store.writeSources(id, [...this.d.store.sources(id), source])
+    this.log(id, {
+      stage: 'project',
+      action: 'context',
+      by: 'designer',
+      note: `Added ${source.kind === 'file' ? 'file' : 'note'}: ${title} (${source.words.toLocaleString()} words)`,
+      // Notes are logged in full; files stay in context/sources.json, so the log names them only.
+      details: source.kind === 'note' ? text : `File: ${title}\n${source.words.toLocaleString()} words, kept in context/sources.json`,
+    })
+    return this.context(id)
+  }
+
+  deleteContext(id: string, sourceId: string): ContextSource[] {
+    const s = this.context(id).find((x) => x.id === sourceId)
+    if (!s) return this.context(id)
+    if (sourceId === 'setup') {
+      const p = this.project(id)
+      p.context = ''
+      this.d.store.save(p)
+    } else this.d.store.writeSources(id, this.d.store.sources(id).filter((x) => x.id !== sourceId))
+    this.log(id, { stage: 'project', action: 'context', by: 'designer', note: `Removed ${s.kind}: ${s.title}`, details: s.kind === 'note' ? s.text : undefined })
+    return this.context(id)
+  }
+
+  /**
+   * Fills Align's open questions from the knowledge base. New notes (a brain-dump) are saved to the
+   * knowledge base first, so later phases read them too. Only questions without an answer are touched;
+   * every filled answer is logged with its source and stays editable.
+   */
+  async answerFromContext(id: string, notes?: string): Promise<{ artifact: StageArtifact; filled: number }> {
+    const p = this.project(id)
+    const st = p.stages.align
+    if (st.status !== 'review') throw new Error('Align must be in review to fill answers.')
+    if (notes?.trim()) this.addContext(id, { title: `Notes for open questions · ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`, text: notes, kind: 'note' })
+    const data = migrate('align', this.d.store.data(id, 'align', st.version)) as StageData<'align'>
+    const answers = this.d.store.answers(id)
+    const open = data.questions.filter((q) => !effectiveAnswer(q, answers))
+    if (!open.length) return { artifact: this.artifact(id, 'align')!, filled: 0 }
+    const kb = selectContext(this.context(id), open.map((q) => `${q.question} ${q.why}`).join('\n'))
+    if (!kb.text) throw new Error('Add some context first.')
+    const agent = loadAgent(this.d.agentsDir, 'align')
+    const ctrl = new AbortController()
+    const schema = z.object({
+      answers: z.array(z.object({ id: z.string(), answer: z.string().describe('One or two short sentences, grounded in the context'), source: z.string().describe('Title of the context source it came from') })).describe('Only questions the context actually answers'),
+    })
+    const prompt = [
+      `# Designer's knowledge base\n${kb.text}`,
+      `# Open questions\n${open.map((q) => `- ${q.id}: ${q.question}`).join('\n')}`,
+      `# Task\nAnswer each open question the knowledge base settles, citing the source title. Skip any it doesn't settle; never guess. Keep each answer short.`,
+    ].join('\n\n')
+    this.d.emit({ projectId: id, stage: 'align', kind: 'log', message: 'Reading your context…' })
+    const { data: out } = await this.d.llm.generate({
+      system: `You match a designer's notes to open product questions. Use only the knowledge base given. Respond only with the structured output.`,
+      prompt,
+      schema,
+      models: this.d.modelOverride().trim() ? [this.d.modelOverride().trim()] : agent.models,
+      effort: 'low',
+      workingDirectory: this.d.store.dir(id),
+      signal: ctrl.signal,
+      onProgress: () => {},
+    })
+    const valid = out.answers.filter((a) => open.some((q) => q.id === a.id) && a.answer.trim())
+    if (valid.length) {
+      const merged = { ...answers, ...Object.fromEntries(valid.map((a) => [a.id, a.answer.trim()])) }
+      this.d.store.writeAnswers(id, merged)
+      this.d.store.writeAnswerSources(id, { ...this.d.store.answerSources(id), ...Object.fromEntries(valid.map((a) => [a.id, a.source.trim() || 'Your context'])) })
+      this.d.store.writeVersion(id, 'align', st.version, data, render('align', data, { answers: merged }))
+      this.log(id, {
+        stage: 'align',
+        action: 'answered',
+        by: 'agent',
+        actor: agent.name,
+        version: st.version,
+        note: `Filled ${valid.map((a) => a.id).join(', ')} from context`,
+        details: valid.map((a) => `${a.id}: ${data.questions.find((q) => q.id === a.id)?.question}\n→ ${a.answer.trim()} (from ${a.source.trim() || 'context'})`).join('\n\n'),
+      })
+    }
+    return { artifact: this.artifact(id, 'align')!, filled: valid.length }
   }
 
   // ---------- studio: screen-level edits ----------
@@ -639,9 +741,14 @@ export class Orchestrator {
     const withTranscript = agent.transcript || (!inputs.length && !screensFrom)
 
     const parts: string[] = [`# Project\nName: ${p.name}\nDesign system: ${this.ds(p).name}`]
-    if (p.context.trim()) parts.push(`## Designer's context\n${p.context.trim()}`)
-    if (withTranscript) parts.push(`# Meeting transcript\n<transcript>\n${store.transcript(p.id)}\n</transcript>`)
-    for (const s of inputs) parts.push(`# Approved input: ${title(s)}\n<${s}>\n${store.markdown(p.id, s) ?? ''}\n</${s}>`)
+    const transcript = withTranscript ? store.transcript(p.id) : ''
+    const inputText = inputs.map((s) => [s, store.markdown(p.id, s) ?? ''] as const)
+    // The knowledge base: whole when small, else the passages most relevant to this phase's inputs.
+    const kb = selectContext(this.context(p.id), [transcript, ...inputText.map(([, md]) => md), feedback ?? ''].join('\n').slice(0, CONTEXT_BUDGET * 2))
+    if (kb.text)
+      parts.push(`# Designer's knowledge base${kb.partial ? ' (most relevant excerpts)' : ''}\nNotes and documents the designer added. Treat them as reliable context; prefer them over guesses.\n<context>\n${kb.text}\n</context>`)
+    if (withTranscript) parts.push(`# Meeting transcript\n<transcript>\n${transcript}\n</transcript>`)
+    for (const [s, md] of inputText) parts.push(`# Approved input: ${title(s)}\n<${s}>\n${md}\n</${s}>`)
     const missing = agent.inputs.filter((s) => !usable(s) && stage !== 'casestudy')
     if (missing.length) parts.push(`# Not available\nThe designer's process skips or postpones: ${missing.map(title).join(', ')}. Work from what is provided; don't invent their content.`)
     if (screensFrom) {
@@ -684,6 +791,7 @@ const ACTION_LABEL: Record<Decision['action'], string> = {
   stakeholder_verdict: 'Stakeholder decision',
   signed_off: 'Signed off',
   note: 'Decision noted',
+  context: 'Context updated',
   exported: 'Exported',
   cancelled: 'Run cancelled',
   error: 'Run failed',
