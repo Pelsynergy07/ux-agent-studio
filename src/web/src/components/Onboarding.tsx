@@ -61,7 +61,7 @@ export function Onboarding({ auth, onAuth, sharingAvailable, onClose, onNewProje
       id: 'context',
       icon: BookOpen,
       title: 'Give it context once',
-      body: 'Put shared files and notes in the Library and tag them. Each project follows the tags it needs. Agents answer most questions from them and only ask when something essential is missing.',
+      body: 'Put shared files, notes, and UI references in the Context Library and tag them. Each project follows the tags it needs. Agents answer most questions from them and only ask when something essential is missing.',
     },
     {
       id: 'steer',

@@ -280,7 +280,7 @@ export function Library() {
   return (
     <div className="page library notion-library">
       <PageHead
-        title="Library"
+        title="Context Library"
         sub="Knowledge base and documents shared across projects. Organize with Notion-style folders and tags."
         actions={
           <div className="row">
@@ -355,7 +355,7 @@ export function Library() {
 
       {/* New Item Modal */}
       {composerOpen && (
-        <Modal title="Add to Library" onClose={() => setComposerOpen(false)} wide>
+        <Modal title="Add to Context Library" onClose={() => setComposerOpen(false)} wide>
           <form
             onSubmit={(e) => {
               e.preventDefault()
@@ -461,7 +461,7 @@ export function Library() {
                   disabled={!text.trim()}
                   loading={busy && !!text.trim()}
                 >
-                  Save to Library
+                  Save to Context Library
                 </Button>
               </div>
             </div>
@@ -765,7 +765,7 @@ export function Library() {
                   setSelectedTag(null)
                 }}
               >
-                Library
+                Context Library
               </button>
               {selectedFolder !== null && (
                 <>
@@ -1081,7 +1081,7 @@ export function Library() {
                             label="Delete"
                             size="sm"
                             onClick={() =>
-                              confirm(`Delete “${i.title}” from the Library? Projects using it will stop reading it.`) &&
+                              confirm(`Delete “${i.title}” from the Context Library? Projects using it will stop reading it.`) &&
                               act(() => api.deleteLibraryItem(i.id))
                             }
                           />
@@ -1125,8 +1125,8 @@ export function Library() {
           {lib && !lib.items.length && (
             <div className="notion-empty-state">
               <p className="muted">
-                Your Library is empty. Add your product’s design guidelines, meeting summaries, compliance rules,
-                and stakeholder notes here to share across all projects.
+                Your Context Library is empty. Add your product’s design guidelines, meeting summaries, compliance rules,
+                and UI reference mockups here to share across all projects.
               </p>
             </div>
           )}

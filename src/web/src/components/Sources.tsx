@@ -116,21 +116,21 @@ export function SourcesEditor({ project, transcript = '', onChange }: { project:
     <div className="sources-editor">
       {error && <p className="danger-text small">{error}</p>}
 
-      {/* 1. From your Library */}
+      {/* 1. From your Context Library */}
       <Card
         icon={BookOpen}
         iconClassName="icon-accent"
-        label="From your Library"
+        label="From your Context Library"
         count={libIn.length}
         actions={
           <a className="sources-lib-link" href="#/library" target="_blank" rel="noreferrer">
-            Manage Library <ExternalLink aria-hidden="true" className="link-ext-icon" />
+            Manage Context Library <ExternalLink aria-hidden="true" className="link-ext-icon" />
           </a>
         }
       >
         {!library ? null : library.items.length === 0 ? (
           <p className="muted small sources-empty-hint">
-            Your Library is empty. Add shared files and notes in the Library to reuse them across all your projects.
+            Your Context Library is empty. Add shared files, notes, and UI references in the Context Library to reuse them across all your projects.
           </p>
         ) : (
           <div className="sources-card-body">

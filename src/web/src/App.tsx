@@ -222,7 +222,7 @@ export function App() {
           </a>
           <a href="#/library" className={page === 'library' ? 'on' : ''}>
             <LibraryIcon aria-hidden="true" />
-            Library
+            Context Library
           </a>
           <a href="#/agents" className={page === 'agents' ? 'on' : ''}>
             <Bot aria-hidden="true" />
@@ -299,7 +299,7 @@ export function App() {
                       setDraggingProjectId(null)
                     }}
                   >
-                    <div className="side-folder-row">
+                    <div className={`side-folder-row ${folderMenuOpen === folderName ? 'menu-open' : ''}`}>
                       <button
                         type="button"
                         className="side-folder-toggle"
@@ -317,7 +317,7 @@ export function App() {
                       <div className="side-folder-menu-wrap">
                         <button
                           type="button"
-                          className="side-folder-more"
+                          className={`side-folder-more ${folderMenuOpen === folderName ? 'active' : ''}`}
                           title="Folder options"
                           onClick={(e) => {
                             e.stopPropagation()
