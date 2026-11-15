@@ -3,7 +3,6 @@ import { BarChart3, ChevronDown, CircleHelp, ExternalLink, KeyRound, Monitor, Mo
 import { useEffect, useState } from 'react'
 import type { AuthInfo, UsageStats } from '../../../shared/types'
 import { api } from '../api'
-import { CountUp } from '../delight'
 import { Button, IconButton } from '../kit/Button'
 import { Badge, Banner } from '../kit/Feedback'
 import { Input, Switch } from '../kit/Field'
@@ -230,7 +229,7 @@ export function UsageDialog({ onClose }: { onClose: () => void }) {
           {tiles.map((t) => (
             <div key={t.label} className="stat">
               <b>
-                <CountUp value={t.value} />
+                {t.value}
               </b>
               <span>{t.label}</span>
             </div>

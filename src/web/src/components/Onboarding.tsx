@@ -29,11 +29,11 @@ export function Onboarding({ auth, onAuth, sharingAvailable, onClose, onNewProje
       id: 'welcome',
       icon: Sparkles,
       title: 'From meeting to a lo-fi your stakeholders sign off',
-      body: 'Paste a meeting transcript. Agents draft each step; you approve each one before the next starts.',
+      body: 'Paste the meeting. Agents draft each step; you approve each one before the next starts.',
       art: [
-        { icon: FileText, label: 'Transcript' },
+        { icon: FileText, label: 'Meeting' },
         { icon: Bot, label: 'Agents draft' },
-        { icon: Check, label: 'You approve' },
+        { icon: Check, label: 'You decide' },
         { icon: LayoutTemplate, label: 'Lo-fi' },
       ],
     },
@@ -47,12 +47,12 @@ export function Onboarding({ auth, onAuth, sharingAvailable, onClose, onNewProje
     {
       id: 'phases',
       icon: Workflow,
-      title: 'Four phases, one at a time',
-      body: 'Understand writes the brief. Align settles open questions and core flows. Shape maps the flows on a canvas. Lo-fi builds clickable iX screens.',
+      title: 'Four steps, one at a time',
+      body: 'Brief: the problem, people, open questions and KPIs. Concepts: three ways to solve it; you pick one. Flow: the user flows, edge cases and impact on other apps. Lo-fi: clickable iX screens to share.',
       art: [
-        { icon: FileText, label: 'Understand' },
-        { icon: Users, label: 'Align' },
-        { icon: Workflow, label: 'Shape' },
+        { icon: FileText, label: 'Brief' },
+        { icon: Users, label: 'Concepts' },
+        { icon: Workflow, label: 'Flow' },
         { icon: LayoutTemplate, label: 'Lo-fi' },
       ],
       focus: -1,
@@ -60,8 +60,8 @@ export function Onboarding({ auth, onAuth, sharingAvailable, onClose, onNewProje
     {
       id: 'context',
       icon: BookOpen,
-      title: 'Tell it what you know',
-      body: 'Drop notes and files in the Context tab. Agents read them and answer most questions themselves, so you only see what’s really open.',
+      title: 'Give it context once',
+      body: 'Put shared files and notes in the Library and tag them. Each project follows the tags it needs. Agents answer most questions from them and only ask when something essential is missing.',
     },
     {
       id: 'steer',

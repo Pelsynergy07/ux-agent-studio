@@ -12,11 +12,32 @@ import { selectContext } from '../src/core/context'
 import { flowToMermaid, migrate } from '../src/core/pipeline'
 import { jsonDiff, Orchestrator } from '../src/core/orchestrator'
 import { Store } from '../src/core/store'
-import { prototypeLinks, stripScripts, withFidelity } from '../src/core/screens'
+import { prototypeLinks, stripScripts, withFidelity, withTheme } from '../src/core/screens'
 import { pipelineWarnings } from '../src/shared/pipelineRules'
 import { PIPELINE_PRESETS, STAGE_IDS, type StageId } from '../src/shared/types'
 
 const fake: Record<StageId | 'casestudy', unknown> = {
+  brief: {
+    title: 'Alarm list', problem: 'Operators miss critical alarms in floods.', summary: 'S', goals: ['Find critical alarms fast'], nonGoals: ['Shelving'], decisions: ['Group by area'], constraints: [],
+    quotes: [{ speaker: 'Aisha', quote: 'I acknowledge everything' }],
+    people: [{ id: 'P1', name: 'Maria', role: 'PO', needFromThem: 'Sign-off', status: 'not-asked', inferred: false }, { id: 'P2', name: 'Safety officer', role: 'Compliance', needFromThem: 'Ack rules', status: 'not-asked', inferred: true }],
+    questions: [
+      { id: 'Q1', question: 'Peak volume?', ask: 'Tom', why: 'density', priority: 'blocking', answer: '', source: '' },
+      { id: 'Q2', question: 'Shelving in scope?', ask: 'Maria', why: 'scope', priority: 'important', answer: 'No.', source: 'Transcript' },
+    ],
+    userStories: [{ id: 'US-1', story: 'As an operator…', priority: 'must' }],
+    coreFlows: [{ id: 'F1', name: 'Triage a critical alarm', goal: 'Act fast' }],
+    northStar: { name: 'Time to act', definition: 'd' },
+    kpis: [{ id: 'K1', name: 'TTA', formula: 'median(t)', howMeasured: 'Event log', when: '4 weeks after release', baseline: 'to be measured', target: '-30%' }, { id: 'K2', name: 'SUS', formula: 'SUS', howMeasured: '', when: '', baseline: '', target: '80' }],
+    risks: [],
+  },
+  explore: {
+    concepts: ['Grouped list', 'Exception board', 'Guided triage'].map((name, i) => ({
+      id: `C${i + 1}`, name, oneLiner: `${name} idea`, approach: ['a'], flow: { id: `C${i + 1}`, name, nodes: [{ id: 'a', label: 'Start', kind: 'start', screen: '' }, { id: 'b', label: 'End', kind: 'end', screen: '' }], edges: [{ from: 'a', to: 'b', label: '' }] },
+      pros: ['p'], cons: ['c'], risks: ['r'], kpisMoved: ['K1 ↓'], effort: 'M', impacts: ['Historian team'],
+    })),
+    recommendation: 'C2 because floods are exceptions', chosen: '', chosenWhy: '',
+  },
   understand: {
     title: 'Alarm list', summary: 'S', problem: 'P', participants: [{ name: 'Maria', role: 'PO' }], decisions: ['Group by area'], constraints: [], openIssues: ['Bulk ack'],
     keyQuotes: [{ speaker: 'Aisha', quote: 'I acknowledge everything' }], goals: ['Find critical alarms fast'], nonGoals: ['Shelving'], personas: [],
@@ -35,13 +56,17 @@ const fake: Record<StageId | 'casestudy', unknown> = {
   shape: {
     summary: 'Flow',
     flows: [{ id: 'F1', name: 'Triage a critical alarm', nodes: [{ id: 'n1', label: 'Alarm raised', kind: 'start', screen: '' }, { id: 'n2', label: 'Alarm list', kind: 'screen', screen: 'alarm-list' }, { id: 'n3', label: 'Critical?', kind: 'decision', screen: '' }], edges: [{ from: 'n1', to: 'n2', label: '' }, { from: 'n2', to: 'n3', label: '' }, { from: 'n3', to: 'n1', label: 'No' }] }],
-    edgeCases: [], screens: [{ id: 'alarm-list', name: 'Alarm list', purpose: 'p', keyComponents: ['ix-pill'] }], kpiHooks: ['K1: list open → ack'] },
+    edgeCoverage: [{ area: 'Empty state', status: 'covered', cases: [{ case: 'No alarms', handling: 'Calm empty state' }] }, { area: 'Permissions', status: 'gap', cases: [] }, { area: 'Localisation', status: 'n/a', cases: [] }],
+    impacts: [{ system: 'Historian', impact: 'Reads ack events', owner: 'Data team' }],
+    screens: [{ id: 'alarm-list', name: 'Alarm list', purpose: 'p', keyComponents: ['ix-pill'] }], kpiHooks: ['K1: list open → ack'] },
   lofi: { notes: 'n', componentsUsed: ['ix-application', 'ix-button'], screens: [{ id: 'alarm-list', title: 'Alarm list', purpose: 'p', bodyHtml: '<ix-application><ix-button onclick="x()">Acknowledge</ix-button><script>alert(1)</script></ix-application>', css: '' }] },
   hifi: { notes: 'n', componentsUsed: ['ix-button'], screens: [{ id: 'alarm-list', title: 'Alarm list', purpose: 'p', bodyHtml: '<ix-button>Acknowledge</ix-button>', css: '' }] },
   casestudy: { title: 'CS', tldr: 't', markdown: '## Context\nc' },
 }
 
 const seen: Record<string, { system: string; prompt: string }> = {}
+const calls = { ready: 0 }
+let readyReply: unknown = { ready: true, questions: [] }
 let hold: (() => void) | null = null
 class MockLLM implements LLMProvider {
   async auth() {
@@ -51,13 +76,24 @@ class MockLLM implements LLMProvider {
     return []
   }
   async generate<T>(req: GenerateRequest<T>): Promise<GenerateResult<T>> {
+    const use = { requestedModel: req.models[0], model: req.models[0], servedModels: ['mock'], effort: req.effort, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, calls: 1, premiumRequests: 1, durationMs: 1 }
+    if (req.system.includes('# Readiness Check')) {
+      calls.ready++
+      seen.ready = { system: req.system, prompt: req.prompt }
+      return { data: req.schema.parse(readyReply), usage: use }
+    }
+    if (req.prompt.includes('Propose 3 new')) {
+      seen.more = { system: req.system, prompt: req.prompt }
+      const more = (fake.explore as { concepts: unknown[] }).concepts.map((c) => ({ ...(c as object), name: 'More ' + (c as { name: string }).name }))
+      return { data: req.schema.parse({ concepts: more }), usage: use }
+    }
     if (req.system.includes("match a designer's notes")) {
       seen.answer = { system: req.system, prompt: req.prompt }
       const data = req.schema.parse({ answers: [{ id: 'Q2', answer: 'Allowed with a confirm step', source: 'Ops handbook' }, { id: 'Q9', answer: 'not a question', source: 'x' }] })
       return { data, usage: { requestedModel: req.models[0], model: req.models[0], servedModels: ['mock'], effort: req.effort, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, calls: 1, premiumRequests: 1, durationMs: 1 } }
     }
     const label = /# Task\nProduce the (.+?) (output )?now/.exec(req.prompt)![1]
-    const stage = ({ Understand: 'understand', Align: 'align', Shape: 'shape', 'Lo-fi': 'lofi', 'Hi-fi': 'hifi', 'case study': 'casestudy' } as Record<string, StageId | 'casestudy'>)[label]
+    const stage = ({ Brief: 'brief', Understand: 'understand', Align: 'align', Concepts: 'explore', Flow: 'shape', 'Lo-fi': 'lofi', 'Hi-fi': 'hifi', 'case study': 'casestudy' } as Record<string, StageId | 'casestudy'>)[label]
     seen[stage] = { system: req.system, prompt: req.prompt }
     if (hold) await new Promise<void>((r) => (hold = r))
     if (req.signal.aborted) throw new Error('aborted')
@@ -83,12 +119,14 @@ const test = async (name: string, fn: () => Promise<void> | void) => {
 }
 const preset = (id: string) => PIPELINE_PRESETS.find((p) => p.id === id)!.stages
 
-const p = orch.create('Alarm list', 'Maria: grouping.\nTom: peaks of 500.', 'SCADA console', preset('standard'), 'ix')
+// The main project uses the pre-Brief phases, as projects made with earlier versions do.
+const LEGACY: StageId[] = ['understand', 'align', 'shape', 'lofi']
+const p = orch.create('Alarm list', 'Maria: grouping.\nTom: peaks of 500.', 'SCADA console', LEGACY, 'ix')
 const id = p.id
 
-await test('standard preset: only Understand is ready; design system recorded', () => {
+await test('older pipeline: only Understand is ready; design system recorded', () => {
   assert.deepEqual(status(id), { understand: 'ready', align: 'locked', shape: 'locked', lofi: 'locked' })
-  assert.match(log(id)[0].details!, /Design system: Siemens iX\nPipeline: Understand → Align → Shape → Lo-fi/)
+  assert.match(log(id)[0].details!, /Design system: Siemens iX\nPipeline: Understand → Align → Flow → Lo-fi/)
 })
 
 await test('locked and skipped phases refuse to run; unknown or unrenderable design systems are rejected', async () => {
@@ -96,6 +134,7 @@ await test('locked and skipped phases refuse to run; unknown or unrenderable des
   await assert.rejects(orch.run(id, 'hifi'), /skipped/)
   assert.throws(() => orch.create('x', 't', '', preset('standard'), 'nope'), /Unknown design system/)
   assert.throws(() => orch.create('x', 't', '', preset('standard'), 'element'), /can't render screens/)
+  assert.deepEqual(preset('standard'), ['brief', 'explore', 'shape', 'lofi'])
 })
 
 await test('inputs: Understand reads the transcript; Align reads the approved brief and the transcript (to answer questions itself)', async () => {
@@ -107,7 +146,7 @@ await test('inputs: Understand reads the transcript; Align reads the approved br
   await orch.run(id, 'align')
   assert.match(seen.align.prompt, /<transcript>/)
   assert.match(seen.align.prompt, /<understand>/)
-  assert.match(seen.align.prompt, /# Designer's knowledge base\n[\s\S]*Notes from project setup\nSCADA console/)
+  assert.match(seen.align.prompt, /# Designer's sources\n[\s\S]*Notes from project setup\nSCADA console/)
 })
 
 await test('answers: each change logged in full, no-op saves log nothing, home shows waiting on stakeholders', () => {
@@ -195,6 +234,10 @@ await test('lo-fi: real iX markup in a greyscale wireframe theme, scripts stripp
   assert.match(withFidelity(html, 'full'), /media="not all"/)
   const wf = /<style id="uxs-wireframe"[^>]*>([^<]*)</.exec(html)![1]
   assert.ok(wf.length > 1000)
+  assert.match(wf, /\[data-ix-theme=classic\]\[data-ix-color-schema=light\]/)
+  assert.match(wf, /\[data-ix-theme=classic\]\[data-ix-color-schema=dark\]/)
+  assert.match(withTheme(html, 'dark'), /data-ix-color-schema="dark"/)
+  assert.match(orch.screenHtml(html, 'wireframe', 'dark'), /data-ix-color-schema="dark"/)
   for (const m of wf.matchAll(/rgba?\((\d+),(\d+),(\d+)/g)) assert.ok(m[1] === m[2] && m[2] === m[3], `non-grey token ${m[0]}`)
 })
 
@@ -282,13 +325,17 @@ await test('reopen relocks later phases with the reason; hi-fi reads the approve
   assert.match(fs.readFileSync(path.join(store.screensDir(id, 'hifi', 1), 'alarm-list.html'), 'utf8'), /data-uxs-fidelity="full"/)
 })
 
-await test('fast preset: Shape works from Understand and is told Align was skipped', async () => {
+await test('fast preset: Flow works from the brief and is told only Concepts was skipped', async () => {
   const f = orch.create('Fast', 'Maria: quick concept.', '', preset('fast'), 'ix')
-  await orch.run(f.id, 'understand')
-  orch.approve(f.id, 'understand')
+  await orch.run(f.id, 'brief')
+  orch.approve(f.id, 'brief')
   await orch.run(f.id, 'shape')
-  assert.match(seen.shape.prompt, /<understand>/)
-  assert.match(seen.shape.prompt, /# Not available\n.*Align/)
+  assert.match(seen.shape.prompt, /<brief>/)
+  assert.match(seen.shape.prompt, /# Not available\n.*Concepts/)
+  assert.doesNotMatch(seen.shape.prompt, /# Not available\n.*(Understand|Align)/)
+  // The transcript isn't sent whole after the brief; it's one of the retrievable sources.
+  assert.doesNotMatch(seen.shape.prompt, /<transcript>/)
+  assert.match(seen.shape.prompt, /## Meeting transcript\nMaria: quick concept\./)
 })
 
 await test('case study: written on demand from the decision log; export bundles case study, phases and full log', async () => {
@@ -299,26 +346,124 @@ await test('case study: written on demand from the decision log; export bundles 
   assert.doesNotMatch(seen.casestudy.prompt, /Draft produced/) // agent bookkeeping left out to save tokens
   assert.match(seen.casestudy.prompt, /# Turnaround/)
   const { markdown } = orch.exportBundle(id)
-  assert.match(markdown.split('---')[0], /# CS/)
+  assert.doesNotMatch(markdown, /# CS/) // the case study is its own deliverable now
+  const cs = orch.caseStudyMarkdown(id, { flows: [{ name: 'F1 Triage', file: 'images/flow-f1.png' }], screens: [{ title: 'Alarm list', file: 'images/screen-alarm-list.png' }] })
+  assert.match(cs, /^# CS\n\n> t\n\n_Kickoff to stakeholder sign-off/)
+  assert.match(cs, /## User flows[\s\S]*!\[F1 Triage\]\(images\/flow-f1\.png\)/)
+  assert.match(cs, /## Edge cases\n\n\| Area \| Status[\s\S]*Empty state \| covered \| No alarms → Calm empty state/)
+  assert.match(cs, /## Screens[\s\S]*!\[Alarm list\]/)
+  orch.saveCaseStudy(id, '## Context\nc\n\nMore detail.')
+  assert.match(last(id).details!, /\+ More detail\./)
   assert.match(markdown, /# Decision log[\s\S]*Edited by hand[\s\S]*Comment[\s\S]*Shared for review[\s\S]*Signed off[\s\S]*Pipeline changed[\s\S]*Reopened[\s\S]*Decision noted/)
 })
 
+// ---------- v2: Brief → Concepts → Flow → Lo-fi ----------
+
+const v = orch.create('Alarm list v2', '', '', preset('standard'), 'ix')
+
+await test('brief: needs the transcript first; the transcript can be added after creating the project', async () => {
+  await assert.rejects(orch.run(v.id, 'brief'), /Paste the meeting transcript first/)
+  orch.setTranscript(v.id, 'Maria: operators drown in alarms.\nTom: 500 a minute in a trip.')
+  assert.match(last(v.id).note!, /Transcript updated \(\d+ words\)/)
+  await orch.run(v.id, 'brief')
+  assert.match(seen.brief.prompt, /<transcript>\nMaria: operators drown/)
+  assert.equal(orch.summary(orch.project(v.id)).state, 'waiting-answers') // Q1 is blocking and open
+})
+
+await test('memory: answers become facts every later step reads first; designers can forget them', () => {
+  orch.saveAnswers(v.id, { Q1: '500 a minute in a trip' })
+  assert.equal(store.memory(v.id)[0].text, 'Peak volume? → 500 a minute in a trip')
+  orch.remember(v.id, 'Night shift has one operator')
+  assert.equal(orch.context(v.id).filter((x) => x.origin === 'memory').length, 2)
+  const fact = store.memory(v.id).find((f) => f.text.startsWith('Night'))!
+  orch.forget(v.id, fact.id)
+  assert.match(last(v.id).note!, /Forgot: Night shift/)
+  orch.remember(v.id, 'Night shift has one operator')
+})
+
+await test('library: projects read items by tag or pin, minus excluded ones; changes are logged', () => {
+  const a = orch.addLibraryItem({ title: 'Alarm philosophy', text: 'ISA-18.2: critical alarms need a response within 60 seconds.', kind: 'note', tags: ['alarms', ' alarms ', 'safety'] })
+  const b = orch.addLibraryItem({ title: 'Brand voice', text: 'Short sentences.', kind: 'note', tags: ['writing'] })
+  assert.deepEqual(a.tags, ['alarms', 'safety'])
+  orch.setSources(v.id, { tags: ['alarms'], pinned: [b.id], excluded: [] })
+  assert.match(last(v.id).details!, /\+ tag: alarms\n\+ pinned: Brand voice/)
+  assert.deepEqual(orch.context(v.id).filter((x) => x.origin === 'library').map((x) => x.title), ['Alarm philosophy', 'Brand voice'])
+  assert.equal(orch.library().items.find((i) => i.id === a.id)!.usedBy, 1)
+  orch.deleteContext(v.id, b.id) // removing a Library item from a project excludes it there
+  assert.deepEqual(orch.project(v.id).sources, { tags: ['alarms'], pinned: [], excluded: [b.id] })
+  assert.equal(orch.library().items.length, 2, 'the Library item itself stays')
+})
+
+await test('checklist: neutral counts from the data', () => {
+  const c = orch.checklist(v.id).items
+  assert.deepEqual(c.find((i) => i.id === 'questions'), { id: 'questions', label: 'Questions answered', done: 2, total: 2 })
+  assert.deepEqual(c.find((i) => i.id === 'kpis'), { id: 'kpis', label: 'KPIs with a measurement plan', done: 1, total: 2 })
+  assert.equal(c.find((i) => i.id === 'people')!.done, 0)
+  assert.ok(!c.some((i) => /reputation|score/i.test(i.label)))
+})
+
+await test('readiness: asks only when the check says so; answers go to memory; unchanged inputs skip the check', async () => {
+  orch.approve(v.id, 'brief')
+  readyReply = { ready: false, questions: [{ id: 'q1', question: 'Can operators silence alarms?', why: 'Changes the ack flow' }] }
+  const r1 = await orch.checkReady(v.id, 'explore')
+  assert.equal(r1.ready, false)
+  assert.match(seen.ready.prompt, /# What the designer told us\n- Peak volume\? → 500 a minute/)
+  assert.match(seen.ready.prompt, /ISA-18\.2/)
+  orch.answerClarify(v.id, 'explore', [{ question: 'Can operators silence alarms?', answer: 'Only non-critical ones' }])
+  assert.equal(last(v.id).action, 'clarified')
+  assert.ok(store.memory(v.id).some((f) => f.text === 'Can operators silence alarms? → Only non-critical ones'))
+  readyReply = { ready: true, questions: [] }
+  assert.equal((await orch.checkReady(v.id, 'explore')).ready, true)
+  const n = calls.ready
+  assert.equal((await orch.checkReady(v.id, 'explore')).ready, true)
+  assert.equal(calls.ready, n, 'same inputs: no second call')
+  assert.equal((await orch.checkReady(v.id, 'brief')).ready, true) // Brief never pre-checks
+})
+
+await test('concepts: must choose before approving; explore more appends; Flow designs the chosen one', async () => {
+  await orch.run(v.id, 'explore')
+  assert.match(seen.explore.prompt, /# What the designer told us\n[\s\S]*Only non-critical ones/)
+  assert.throws(() => orch.approve(v.id, 'explore'), /Choose a concept first/)
+  await orch.exploreMore(v.id, 'something for tablets')
+  assert.match(seen.more.prompt, /# Already explored[\s\S]*C3 Guided triage[\s\S]*# Direction from the designer\nsomething for tablets[\s\S]*C4 to C6/)
+  const ids = (orch.artifact(v.id, 'explore')!.data as { concepts: { id: string }[] }).concepts.map((c) => c.id)
+  assert.deepEqual(ids, ['C1', 'C2', 'C3', 'C4', 'C5', 'C6'])
+  orch.chooseConcept(v.id, 'C2', 'Floods are exceptions')
+  assert.equal(last(v.id).action, 'chosen')
+  assert.ok(store.memory(v.id).some((f) => /Chosen concept: Exception board/.test(f.text)))
+  orch.approve(v.id, 'explore')
+  await orch.run(v.id, 'shape')
+  assert.match(seen.shape.prompt, /\*\*Chosen: C2 Exception board\.\*\* Floods are exceptions/)
+  assert.match(seen.shape.prompt, /## Also considered\n\n- \*\*C1 Grouped list/)
+  assert.ok(orch.checklist(v.id).items.some((i) => i.id === 'edges' && i.done === 2 && i.total === 10))
+})
+
+await test('budget: counted from runs this month; stops new work at the limit unless forced', async () => {
+  const tight = new Orchestrator({ store, llm: new MockLLM(), agentsDir: path.join(ROOT, 'agents'), designSystems, modelOverride: () => '', autoRunNext: () => false, emit: () => {}, budget: () => ({ budgetUsd: 0.1, requestPrice: 0.04 }) })
+  const b = tight.budgetStatus()
+  assert.ok(b.usedRequests > 5 && b.source === 'local' && b.perRun.lofi === 1)
+  const t = tight.create('Tight', 'x', '', ['brief'], 'ix')
+  await assert.rejects(tight.run(t.id, 'brief'), /Monthly budget reached/)
+  await tight.run(t.id, 'brief', undefined, { force: true })
+  assert.equal(tight.project(t.id).stages.brief.status, 'review')
+})
+
 await test('cancelling a run returns the phase to ready and is logged', async () => {
-  const c = orch.create('Cancel', 't', '', preset('fast'), 'generic')
+  const c = orch.create('Cancel', 't', '', ['brief'], 'generic')
   hold = () => {}
-  const run = orch.run(c.id, 'understand')
+  const run = orch.run(c.id, 'brief')
   await new Promise((r) => setTimeout(r, 20))
-  orch.cancel(c.id, 'understand')
+  orch.cancel(c.id, 'brief')
   hold()
   hold = null
   await run
-  assert.equal(status(c.id).understand, 'ready')
+  assert.equal(status(c.id).brief, 'ready')
   assert.equal(last(c.id).action, 'cancelled')
 })
 
 await test('jsonDiff and editor warnings read like sentences', () => {
   assert.deepEqual(jsonDiff({ goals: ['a'] }, { goals: ['a', 'b'] }), ['goals › added #2: "b"'])
-  const titles = { understand: 'Understand', align: 'Align', shape: 'Shape', lofi: 'Lo-fi', hifi: 'Hi-fi' }
+  const titles = { brief: 'Brief', understand: 'Understand', align: 'Align', explore: 'Concepts', shape: 'Shape', lofi: 'Lo-fi', hifi: 'Hi-fi' }
   const w = pipelineWarnings(['understand', 'shape', 'align', 'lofi'], { shape: ['understand', 'align'], lofi: ['understand', 'align', 'shape'] }, titles).map((x) => x.message)
   assert.ok(w.some((m) => /Shape runs before Align/.test(m)))
   assert.ok(pipelineWarnings(['understand', 'align'], {}, titles).some((x) => /nothing to share/.test(x.message)))

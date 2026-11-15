@@ -16,7 +16,7 @@ function AgentIcon({ id }: { id: string }) {
   return <Icon aria-hidden="true" />
 }
 
-type Sel = { kind: 'agent'; id: string } | { kind: 'shared' } | { kind: 'pack'; id: string | null }
+type Sel = { kind: 'agent'; id: string } | { kind: 'new-agent' } | { kind: 'shared' } | { kind: 'pack'; id: string | null }
 
 export function Agents({ stages, onChange }: { stages: StageMeta[]; onChange: () => void }) {
   const [data, setData] = useState<{ agents: AgentDetails[]; shared: string; packs: InstructionPack[] } | null>(null)
@@ -30,14 +30,28 @@ export function Agents({ stages, onChange }: { stages: StageMeta[]; onChange: ()
   }, [])
   if (!data) return null
   const title = (id: string) => (id === 'casestudy' ? 'Case study' : (stages.find((s) => s.id === id)?.title ?? id))
+  const pipelineAgents = data.agents.filter((a) => !a.custom)
+  const customAgents = data.agents.filter((a) => a.custom)
 
   return (
     <div className="page agents-page">
-      <PageHead title="Agents" sub="What each agent does, which model runs it, and the instructions it follows." />
+      <PageHead
+        title="Agents"
+        sub="What each agent does, which model runs it, and the instructions it follows."
+        actions={
+          <Button
+            variant="primary"
+            size="sm"
+            icon={Plus}
+            onClick={() => setSel({ kind: 'new-agent' })}
+          >
+            New agent
+          </Button>
+        }
+      />
       <div className="agents-layout">
         <nav className="agents-nav" aria-label="Agents">
-          <span className="nav-label">Pipeline</span>
-          {data.agents.map((a) => (
+          {pipelineAgents.map((a) => (
             <button key={a.id} className={`nav-item ${sel.kind === 'agent' && sel.id === a.id ? 'on' : ''}`} onClick={() => setSel({ kind: 'agent', id: a.id })}>
               <AgentIcon id={a.id} />
               <span className="nav-text">
@@ -48,6 +62,39 @@ export function Agents({ stages, onChange }: { stages: StageMeta[]; onChange: ()
               </span>
             </button>
           ))}
+          {customAgents.length > 0 && (
+            <>
+              <span className="nav-label">Custom Agents</span>
+              {customAgents.map((a) => (
+                <div key={a.id} className="nav-item-wrap">
+                  <button className={`nav-item ${sel.kind === 'agent' && sel.id === a.id ? 'on' : ''}`} onClick={() => setSel({ kind: 'agent', id: a.id })}>
+                    <AgentIcon id={a.id} />
+                    <span className="nav-text">
+                      <span className="nav-title">{a.name}</span>
+                      <span className="nav-sub">{a.models[0] ?? 'default'}</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="nav-item-delete"
+                    title={`Delete agent "${a.name}"`}
+                    aria-label={`Delete agent "${a.name}"`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (window.confirm(`Delete custom agent "${a.name}"? This cannot be undone.`)) {
+                        void api.deleteAgent(a.id).then(async () => {
+                          await load()
+                          setSel({ kind: 'agent', id: 'understand' })
+                        })
+                      }
+                    }}
+                  >
+                    <Trash2 aria-hidden="true" />
+                  </button>
+                </div>
+              ))}
+            </>
+          )}
           <span className="nav-label">Shared</span>
           <button className={`nav-item ${sel.kind === 'shared' ? 'on' : ''}`} onClick={() => setSel({ kind: 'shared' })}>
             <ScrollText aria-hidden="true" />
@@ -74,7 +121,28 @@ export function Agents({ stages, onChange }: { stages: StageMeta[]; onChange: ()
         </nav>
 
         <section className="agents-editor">
-          {sel.kind === 'agent' && <AgentEditor key={sel.id} agent={data.agents.find((a) => a.id === sel.id)!} phase={title(sel.id)} titleOf={title} onSaved={load} />}
+          {sel.kind === 'agent' && (
+            <AgentEditor
+              key={sel.id}
+              agent={data.agents.find((a) => a.id === sel.id) ?? data.agents[0]}
+              phase={title(sel.id)}
+              titleOf={title}
+              onSaved={load}
+              onDeleted={async () => {
+                await load()
+                setSel({ kind: 'agent', id: 'understand' })
+              }}
+            />
+          )}
+          {sel.kind === 'new-agent' && (
+            <NewAgentEditor
+              onCreated={async (id) => {
+                await load()
+                setSel({ kind: 'agent', id })
+              }}
+              onCancel={() => setSel({ kind: 'agent', id: 'understand' })}
+            />
+          )}
           {sel.kind === 'shared' && <SharedEditor key="shared" text={data.shared} onSaved={load} />}
           {sel.kind === 'pack' && (
             <PackEditor
@@ -110,7 +178,7 @@ function useSave() {
   return { run, bar }
 }
 
-function AgentEditor({ agent, phase, titleOf, onSaved }: { agent: AgentDetails; phase: string; titleOf: (id: string) => string; onSaved: () => void }) {
+function AgentEditor({ agent, phase, titleOf, onSaved, onDeleted }: { agent: AgentDetails; phase: string; titleOf: (id: string) => string; onSaved: () => void; onDeleted?: () => void }) {
   const [name, setName] = useState(agent.name)
   const [description, setDescription] = useState(agent.description)
   const [models, setModels] = useState(agent.models.join(', '))
@@ -120,17 +188,37 @@ function AgentEditor({ agent, phase, titleOf, onSaved }: { agent: AgentDetails; 
   const dirty = name !== agent.name || description !== agent.description || models !== agent.models.join(', ') || effort !== (agent.effort ?? '') || prompt !== agent.prompt
   return (
     <div className="editor-card">
-      <header className="editor-head">
+      <header className="editor-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
-          <span className="eyebrow">{phase}</span>
+          <span className="eyebrow">{agent.custom ? 'Custom Agent' : phase}</span>
           <h2>{agent.name}</h2>
           <p className="muted small">{agent.description}</p>
         </div>
-        <div className="chips">
-          <span className="chip">Reads {agent.inputs.length ? agent.inputs.map(titleOf).join(', ') : 'the transcript'}</span>
-          {agent.transcript && agent.inputs.length > 0 && <span className="chip">+ transcript</span>}
-          {agent.designSystem !== 'none' && <span className="chip">Design system: {agent.designSystem === 'full' ? 'rules + components' : 'rules'}</span>}
-          {agent.decisions && <span className="chip">+ decision log</span>}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+          {agent.custom && onDeleted && (
+            <Button
+              variant="danger"
+              size="sm"
+              icon={Trash2}
+              onClick={() => {
+                if (window.confirm(`Delete agent "${agent.name}"? This cannot be undone.`)) {
+                  run(async () => {
+                    await api.deleteAgent(agent.id)
+                    onDeleted()
+                  }, 'Agent deleted.')
+                }
+              }}
+            >
+              Delete agent
+            </Button>
+          )}
+          <div className="chips">
+            {agent.custom && <Badge>Custom</Badge>}
+            <span className="chip">Reads {agent.inputs.length ? agent.inputs.map(titleOf).join(', ') : 'the transcript'}</span>
+            {agent.transcript && agent.inputs.length > 0 && <span className="chip">+ transcript</span>}
+            {agent.designSystem !== 'none' && <span className="chip">Design system: {agent.designSystem === 'full' ? 'rules + components' : 'rules'}</span>}
+            {agent.decisions && <span className="chip">+ decision log</span>}
+          </div>
         </div>
       </header>
       {bar}
@@ -141,12 +229,105 @@ function AgentEditor({ agent, phase, titleOf, onSaved }: { agent: AgentDetails; 
         <Select label="Reasoning effort" value={effort} onChange={(e) => setEffort(e.target.value)} options={['low', 'medium', 'high', 'xhigh', 'max'].map((x) => ({ value: x, label: x }))} />
       </div>
       <Textarea label="System prompt" mono minRows={14} maxRows={40} hint="The rules for every agent come before this; your instructions come after it." value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-      <div className="row end sticky-actions">
-        <Button variant="ghost" disabled={!dirty} onClick={() => (setName(agent.name), setDescription(agent.description), setModels(agent.models.join(', ')), setEffort(agent.effort ?? ''), setPrompt(agent.prompt))}>
-          Discard
+      <div className="row end sticky-actions" style={{ justifyContent: 'space-between' }}>
+        <div>
+          {agent.custom && onDeleted && (
+            <Button
+              variant="danger"
+              icon={Trash2}
+              onClick={() => {
+                if (window.confirm(`Delete agent "${agent.name}"? This cannot be undone.`)) {
+                  run(async () => {
+                    await api.deleteAgent(agent.id)
+                    onDeleted()
+                  }, 'Agent deleted.')
+                }
+              }}
+            >
+              Delete agent
+            </Button>
+          )}
+        </div>
+        <div className="row" style={{ gap: '0.5rem' }}>
+          <Button variant="ghost" disabled={!dirty} onClick={() => (setName(agent.name), setDescription(agent.description), setModels(agent.models.join(', ')), setEffort(agent.effort ?? ''), setPrompt(agent.prompt))}>
+            Discard
+          </Button>
+          <Button variant="primary" disabled={!dirty} onClick={() => run(async () => (await api.saveAgent(agent.id, { name, description, models: models.split(','), effort, prompt }), onSaved()))}>
+            Save agent
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function NewAgentEditor({ onCreated, onCancel }: { onCreated: (id: string) => void; onCancel: () => void }) {
+  const [name, setName] = useState('')
+  const [id, setId] = useState('')
+  const [idTouched, setIdTouched] = useState(false)
+  const [description, setDescription] = useState('')
+  const [models, setModels] = useState('claude-sonnet-5.5, gpt-5.5')
+  const [effort, setEffort] = useState('medium')
+  const [prompt, setPrompt] = useState('You are an expert design agent. Follow the guidelines and instructions provided.')
+  const { run, bar } = useSave()
+
+  const handleNameChange = (val: string) => {
+    setName(val)
+    if (!idTouched) {
+      setId(val.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''))
+    }
+  }
+
+  const valid = name.trim().length > 0 && id.trim().length > 0 && prompt.trim().length > 0
+
+  return (
+    <div className="editor-card">
+      <header className="editor-head">
+        <div>
+          <span className="eyebrow">New Agent</span>
+          <h2>Create custom agent</h2>
+          <p className="muted small">Configure a new agent with specialized instructions, model routing, and behavior.</p>
+        </div>
+      </header>
+      {bar}
+      <div className="grid2">
+        <Input label="Name" placeholder="e.g. Usability Reviewer" value={name} onChange={(e) => handleNameChange(e.target.value)} />
+        <Input
+          label="Agent ID (folder slug)"
+          placeholder="e.g. usability-reviewer"
+          value={id}
+          onChange={(e) => {
+            setIdTouched(true)
+            setId(e.target.value.toLowerCase().replace(/[^a-z0-9_-]+/g, ''))
+          }}
+        />
+        <Input label="What it does" placeholder="e.g. Analyzes screens against WCAG and Nielsen Norman heuristics" value={description} onChange={(e) => setDescription(e.target.value)} />
+        <Input label="Models, in order of preference" hint="Copilot model ids, comma-separated." value={models} onChange={(e) => setModels(e.target.value)} />
+        <Select label="Reasoning effort" value={effort} onChange={(e) => setEffort(e.target.value)} options={['low', 'medium', 'high', 'xhigh', 'max'].map((x) => ({ value: x, label: x }))} />
+      </div>
+      <Textarea label="System prompt" mono minRows={12} maxRows={30} hint="Specify the core behavior, role, constraints, and instructions for this agent." value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+      <div className="row end sticky-actions" style={{ gap: '0.5rem' }}>
+        <Button variant="ghost" onClick={onCancel}>
+          Cancel
         </Button>
-        <Button variant="primary" disabled={!dirty} onClick={() => run(async () => (await api.saveAgent(agent.id, { name, description, models: models.split(','), effort, prompt }), onSaved()))}>
-          Save agent
+        <Button
+          variant="primary"
+          disabled={!valid}
+          onClick={() =>
+            run(async () => {
+              await api.createAgent({
+                id: id.trim(),
+                name: name.trim(),
+                description: description.trim(),
+                models: models.split(',').map((m) => m.trim()).filter(Boolean),
+                effort: effort as any,
+                prompt: prompt.trim(),
+              })
+              onCreated(id.trim())
+            }, 'Agent created successfully!')
+          }
+        >
+          Create agent
         </Button>
       </div>
     </div>

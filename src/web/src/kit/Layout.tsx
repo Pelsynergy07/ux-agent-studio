@@ -92,42 +92,71 @@ export function Menu({ trigger, items, align = 'right' }: { trigger: (toggle: ()
 export type StepState = 'locked' | 'ready' | 'running' | 'review' | 'approved' | 'error'
 
 /**
- * The phase bar: phases as segments of one track, with a raised pill that slides to the current one.
- * One small glyph per phase says where it stands; a hairline underneath fills as phases are approved.
+ * The project's steps as a quiet progress line: plain labels over thin bars. A filled bar is done,
+ * the accent bar is where you are, an empty one is still ahead. No icons, no ticks.
  */
-export function Stepper({ steps, current, onSelect }: { steps: { id: string; title: string; state: StepState; hint: string; icon?: LucideIcon; extra?: boolean }[]; current: string; onSelect: (id: string) => void }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [pill, setPill] = useState({ left: 0, width: 0, ready: false })
-  useLayoutEffect(() => {
-    const measure = () => {
-      const el = ref.current?.querySelector<HTMLElement>('[aria-current="step"]')
-      if (el) setPill({ left: el.offsetLeft, width: el.offsetWidth, ready: true })
-    }
-    measure()
-    const ro = new ResizeObserver(measure)
-    if (ref.current) ro.observe(ref.current)
-    return () => ro.disconnect()
-  }, [current, steps.length])
-  // Extra tabs (like Context) sit in the bar but aren't phases, so they don't count as progress.
-  const phases = steps.filter((s) => !s.extra)
-  const done = phases.filter((s) => s.state === 'approved').length
+export function Steps({ steps, current, onSelect }: { steps: { id: string; title: string; state: StepState; hint: string }[]; current: string; onSelect: (id: string) => void }) {
   return (
-    <nav className="phasebar" aria-label="Phases">
-      <div className="phasebar-track" ref={ref} role="tablist">
-        <span className={`phasebar-pill ${pill.ready ? 'ready' : ''}`} style={{ transform: `translateX(${pill.left}px)`, width: pill.width }} aria-hidden="true" />
-        {steps.map((s) => (
-          <button key={s.id} type="button" role="tab" aria-selected={s.id === current} aria-current={s.id === current ? 'step' : undefined} className={`pb-item st-${s.state} ${s.extra ? 'pb-extra' : ''}`} title={s.hint} onClick={() => onSelect(s.id)}>
-            <span className="pb-glyph" aria-hidden="true">
-              {s.icon ? <s.icon /> : s.state === 'approved' ? <Check /> : s.state === 'running' ? <Spinner size={14} /> : s.state === 'locked' ? <Lock /> : s.state === 'error' ? <AlertCircle /> : <i />}
-            </span>
-            <span className="pb-name">{s.title}</span>
-            {s.state === 'review' && <span className="pb-flag">Review</span>}
-          </button>
-        ))}
-      </div>
-      <span className="phasebar-progress" aria-label={`${done} of ${phases.length} phases approved`}>
-        <span style={{ width: `${(done / Math.max(phases.length, 1)) * 100}%` }} />
-      </span>
+    <nav className="progress-steps" aria-label="Steps">
+      {steps.map((s, i) => (
+        <button key={s.id} type="button" aria-current={s.id === current ? 'step' : undefined} className={`pstep st-${s.state}`} title={s.hint} onClick={() => onSelect(s.id)}>
+          <span className="pstep-label">
+            <span className="pstep-n">{i + 1}</span>
+            {s.title}
+            {s.state === 'running' && <Spinner size={11} />}
+            {s.state === 'error' && <AlertCircle className="pstep-err" aria-label="Failed" />}
+          </span>
+          <span className="pstep-bar" aria-hidden="true" />
+        </button>
+      ))}
     </nav>
+  )
+}
+
+/** Sub-steps inside a step: numbered, done ones ticked, joined by a hairline. */
+export function SubSteps({ items, current, onSelect }: { items: { id: string; label: string; done?: boolean; disabled?: boolean }[]; current: string; onSelect: (id: string) => void }) {
+  return (
+    <div className="substeps" role="tablist" aria-label="Sub-steps">
+      {items.map((it, i) => (
+        <button key={it.id} type="button" role="tab" aria-selected={it.id === current} className={`${it.id === current ? 'on' : ''} ${it.done ? 'done' : ''}`} disabled={it.disabled} onClick={() => onSelect(it.id)}>
+          <span className="substep-n" aria-hidden="true">
+            {it.done ? <Check /> : i + 1}
+          </span>
+          {it.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** A titled block separated from the previous one by a full-width rule. */
+export function Section({ id, label, title, aside, children, className = '' }: { id?: string; label?: string; title?: ReactNode; aside?: ReactNode; children: ReactNode; className?: string }) {
+  return (
+    <section id={id} className={`sect ${className}`}>
+      {(label || title || aside) && (
+        <header className="sect-head">
+          <div>
+            {label && <span className="sect-label">{label}</span>}
+            {title && <h3 className="sect-title">{title}</h3>}
+          </div>
+          {aside && <div className="sect-aside">{aside}</div>}
+        </header>
+      )}
+      {children}
+    </section>
+  )
+}
+
+/** Numbers in a row, separated by vertical rules. */
+export function Stats({ items }: { items: { label: string; value: ReactNode; tone?: 'warn' | 'ok' }[] }) {
+  return (
+    <dl className="stats-strip">
+      {items.map((it) => (
+        <div key={it.label} className={it.tone ? `t-${it.tone}` : ''}>
+          <dt>{it.label}</dt>
+          <dd>{it.value}</dd>
+        </div>
+      ))}
+    </dl>
   )
 }

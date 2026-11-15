@@ -5,13 +5,13 @@
 //   Link     – pick a clickable element and choose which screen it opens; saved like a text edit.
 //   Comment  – click an element and leave a comment (for the next revision or for the record).
 //   Present  – true full screen for review meetings: click through or use arrow keys, comment in place.
-import { ArrowRight, ChevronLeft, ChevronRight, Link2, LogOut, Maximize2, MessageSquare, MousePointerClick, Palette, ScanLine, Type, Unlink, Wand2, X } from 'lucide-react'
+import { ArrowRight, ChevronLeft, ChevronRight, Link2, LogOut, Maximize2, MessageSquare, Moon, MousePointerClick, Palette, ScanLine, Sun, Type, Unlink, Wand2, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Comment, Decision, Project, StageArtifact, StageId } from '../../../shared/types'
 import { api, previewOrigin } from '../api'
 import { Button, IconButton, Segmented } from '../kit/Button'
-import { Spinner } from '../kit/Feedback'
+import { Banner, Spinner } from '../kit/Feedback'
 import { Select } from '../kit/Field'
 import { ago, cleanError } from '../ui'
 import { CommentRow } from './editors'
@@ -43,10 +43,12 @@ export function Studio({ project, stage, artifact, comments, decisions, running,
   const [mode, setMode] = useState<Mode>(editable ? 'edit' : 'comment')
   const [present, setPresent] = useState(false)
   const [fidelity, setFidelity] = useState<'wireframe' | 'full'>('wireframe')
+  const [theme, setTheme] = useState<'light' | 'dark'>(screens[0]?.theme ?? 'light')
   const [target, setTarget] = useState<El | null>(null)
   const [text, setText] = useState('')
   const [saidBy, setSaidBy] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const stageError = project.stages[stage]?.error
+  const [error, setError] = useState<string | null>(stageError ?? null)
   const [saved, setSaved] = useState<string | null>(null)
   const [attrs, setAttrs] = useState<{ selector: string; tag: string; attrs: Record<string, string> } | null>(null)
   const [linkTarget, setLinkTarget] = useState<LinkEl | null>(null)
@@ -54,6 +56,24 @@ export function Studio({ project, stage, artifact, comments, decisions, running,
   const [hotspots, setHotspots] = useState(false)
   const screen = screens[Math.min(index, screens.length - 1)]
   const isLofi = stage === 'lofi'
+
+  useEffect(() => {
+    if (project.stages[stage]?.error) setError(project.stages[stage].error)
+  }, [project.stages[stage]?.error])
+
+  const prevVersion = useRef(artifact.version)
+  useEffect(() => {
+    if (artifact.version > prevVersion.current) {
+      prevVersion.current = artifact.version
+      setText('')
+      setTarget(null)
+      setError(null)
+    }
+  }, [artifact.version])
+
+  useEffect(() => {
+    if (screen?.theme) setTheme(screen.theme)
+  }, [screen?.id, screen?.theme])
 
   // Present: real browser full screen. Leaving full screen (Esc) returns to the studio.
   const enterPresent = useCallback(async () => {
@@ -126,6 +146,7 @@ export function Studio({ project, stage, artifact, comments, decisions, running,
 
   const q = new URLSearchParams({
     fidelity: isLofi ? fidelity : '',
+    theme,
     annotate: mode === 'edit' || mode === 'comment' ? '1' : '',
     edit: mode === 'text' && editable ? '1' : '',
     link: mode === 'link' && editable ? '1' : '',
@@ -139,8 +160,6 @@ export function Studio({ project, stage, artifact, comments, decisions, running,
     setError(null)
     try {
       await api.editScreen(project.id, stage, screen.id, text, target ?? undefined)
-      setText('')
-      setTarget(null)
       onChange()
     } catch (e) {
       setError(cleanError(e))
@@ -213,6 +232,16 @@ export function Studio({ project, stage, artifact, comments, decisions, running,
                 ]}
               />
             )}
+            <Segmented
+              label="Theme"
+              size="sm"
+              value={theme}
+              onChange={setTheme}
+              options={[
+                { value: 'light', label: 'Light', icon: Sun },
+                { value: 'dark', label: 'Dark', icon: Moon },
+              ]}
+            />
             <Button variant="primary" size="sm" icon={Maximize2} onClick={enterPresent}>
               Present
             </Button>
@@ -245,7 +274,11 @@ export function Studio({ project, stage, artifact, comments, decisions, running,
 
         {!present && (
           <aside className="studio-panel">
-            {error && <p className="danger-text small">{error}</p>}
+            {(error || stageError) && (
+              <Banner tone="danger">
+                <b>Agent error:</b> {error || stageError}
+              </Banner>
+            )}
             {mode === 'play' && (
               <>
                 <h3>Click through</h3>

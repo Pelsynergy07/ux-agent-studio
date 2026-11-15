@@ -25,12 +25,19 @@ export function prototypeLinks(html: string): { label: string; goto: string }[] 
   return out
 }
 
-export function wrapScreen(ds: DesignSystem, fidelity: Fidelity, title: string, body: string, css: string): string {
+export function wrapScreen(ds: DesignSystem, fidelity: Fidelity, title: string, body: string, css: string, theme?: 'light' | 'dark'): string {
+  const isDark = theme === 'dark' || /data-ix-color-schema=["']dark["']|theme=["']classic-dark["']/i.test(body)
+  const resolved = isDark ? 'dark' : (theme ?? 'light')
+  let attrs = ds.htmlAttrs
+  if (resolved === 'dark') {
+    attrs = attrs.replace(/data-ix-color-schema="light"/, 'data-ix-color-schema="dark"')
+    if (!attrs.includes('data-theme')) attrs += ' data-theme="dark"'
+  }
   return `<!doctype html>
-<html lang="en" ${ds.htmlAttrs} data-uxs-fidelity="${fidelity}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en" ${attrs} data-uxs-fidelity="${fidelity}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title>
 ${ds.head(fidelity)}
-<style>html[data-ix-theme][data-ix-color-schema]{--theme-font-sans:"Siemens Sans","Segoe UI",system-ui,-apple-system,sans-serif}html,body{margin:0;min-height:100%}body{font-family:var(--theme-font-sans,system-ui,sans-serif)}${css.replace(/<\/?style[^>]*>/gi, '')}</style>
+<style>html[data-ix-theme][data-ix-color-schema]{--theme-font-sans:"Siemens Sans","Segoe UI",system-ui,-apple-system,sans-serif}html,body{margin:0;min-height:100%;background:var(--theme-color-1,#fff);color:var(--theme-color-std-text,#222)}body{font-family:var(--theme-font-sans,system-ui,sans-serif)}${css.replace(/<\/?style[^>]*>/gi, '')}</style>
 </head>
 <body>${stripScripts(body)}</body></html>`
 }
@@ -40,4 +47,11 @@ export function withFidelity(html: string, fidelity: Fidelity): string {
   return html
     .replace(/data-uxs-fidelity="[a-z]+"/, `data-uxs-fidelity="${fidelity}"`)
     .replace(/(<style id="uxs-wireframe" media=")[^"]*"/, `$1${fidelity === 'wireframe' ? 'all' : 'not all'}"`)
+}
+
+/** Switches a stored screen's color schema (light, dark, system) without regenerating it. */
+export function withTheme(html: string, theme: 'light' | 'dark' | 'system'): string {
+  return html
+    .replace(/data-ix-color-schema="[a-z]+"/, `data-ix-color-schema="${theme}"`)
+    .replace(/data-theme="[a-z]+"/, `data-theme="${theme}"`)
 }

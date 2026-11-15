@@ -16,6 +16,7 @@ export interface GenerateRequest<T> {
   workingDirectory: string
   signal: AbortSignal
   onProgress?: (chars: number) => void
+  attachments?: Array<{ type: 'file'; path: string; displayName?: string } | { type: 'blob'; data: string; mimeType: string; displayName?: string }>
 }
 
 export interface GenerateResult<T> {
@@ -28,6 +29,8 @@ export interface LLMProvider {
   models(): Promise<ModelInfo[]>
   generate<T>(req: GenerateRequest<T>): Promise<GenerateResult<T>>
   dispose(): Promise<void>
+  check(token: string): Promise<AuthInfo>
+  reset(): Promise<void>
 }
 
 const TIMEOUT_MS = 15 * 60 * 1000
@@ -110,6 +113,10 @@ export class CopilotProvider implements LLMProvider {
   }
 
   async generate<T>(req: GenerateRequest<T>): Promise<GenerateResult<T>> {
+    const auth = await this.auth()
+    if (!auth.ok) {
+      throw new Error(`GitHub Copilot authentication required (${auth.message || 'Not signed in'}). Please connect your GitHub account in Settings.`)
+    }
     const client = await this.getClient()
     const choice = await this.pick(req.models, req.effort)
     const usage: RunUsage = {
@@ -128,16 +135,26 @@ export class CopilotProvider implements LLMProvider {
     const started = Date.now()
     let session: CopilotSession | null = null
     try {
-      session = await client.createSession({
-        model: choice.model,
-        reasoningEffort: choice.effort,
-        workingDirectory: req.workingDirectory,
-        // Agents are pure generators: no shell, file or web tools.
-        availableTools: [],
-        onPermissionRequest: approveAll,
-        systemMessage: { mode: 'replace', content: req.system },
-        streaming: true,
-      })
+      const open = (model?: string, reasoningEffort?: ReasoningEffort) =>
+        client.createSession({
+          model,
+          reasoningEffort,
+          workingDirectory: req.workingDirectory,
+          // Agents are pure generators: no shell, file or web tools.
+          availableTools: [],
+          onPermissionRequest: approveAll,
+          systemMessage: { mode: 'replace', content: req.system },
+          streaming: true,
+        })
+      try {
+        session = await open(choice.model, choice.effort)
+      } catch (e) {
+        // Without a catalog the first preference is a guess; if Copilot rejects it, use its default.
+        if (!choice.model || (await this.models()).length) throw e
+        usage.model = 'default'
+        usage.note = `${choice.model} was not accepted; used the Copilot default.`
+        session = await open()
+      }
       const s = session
       let chars = 0
       const offDelta = s.on('assistant.message_delta', (e) => {
@@ -156,7 +173,8 @@ export class CopilotProvider implements LLMProvider {
       const onAbort = () => void s.abort().catch(() => {})
       req.signal.addEventListener('abort', onAbort)
       try {
-        const data = await s.sendAndWait(req.prompt, req.schema as never, TIMEOUT_MS)
+        const payload = req.attachments?.length ? { prompt: req.prompt, attachments: req.attachments } : req.prompt
+        const data = await s.sendAndWait(payload, req.schema as never, TIMEOUT_MS)
         return { data: data as T, usage }
       } finally {
         offDelta()
@@ -179,4 +197,71 @@ export class CopilotProvider implements LLMProvider {
     this.client = null
     this.starting = null
   }
+}
+
+/** Local test provider for testing screen edits and pipeline flows without external API calls. */
+export class MockLLM implements LLMProvider {
+  async auth(): Promise<AuthInfo> {
+    return { ok: true, login: 'test-mode', method: 'local-test', source: 'token' }
+  }
+
+  async models(): Promise<ModelInfo[]> {
+    return [{ id: 'test-agent', name: 'Test Agent' } as ModelInfo]
+  }
+
+  async generate<T>(req: GenerateRequest<T>): Promise<GenerateResult<T>> {
+    const isEdit = req.prompt.includes('# Screen to edit:')
+    const use: RunUsage = {
+      requestedModel: req.models[0] ?? 'test-model',
+      model: 'test-model',
+      servedModels: ['test-agent'],
+      effort: req.effort,
+      inputTokens: 120,
+      outputTokens: 80,
+      cacheReadTokens: 0,
+      calls: 1,
+      premiumRequests: 0,
+      durationMs: 250,
+    }
+
+    if (isEdit) {
+      const isDark = /dark\s*(mode|theme)/i.test(req.prompt)
+      const isLight = /light\s*(mode|theme)/i.test(req.prompt)
+      const bodyMatch = /```html\n([\s\S]*?)\n```/.exec(req.prompt)
+      let bodyHtml = bodyMatch ? bodyMatch[1] : '<ix-application><ix-content><p>Screen</p></ix-content></ix-application>'
+      if (isDark) {
+        bodyHtml = bodyHtml.replace(/<ix-application\b([^>]*)>/i, (m, attrs) => {
+          if (attrs.includes('data-ix-color-schema')) return m.replace(/data-ix-color-schema="[^"]*"/, 'data-ix-color-schema="dark"')
+          return `<ix-application${attrs} data-ix-color-schema="dark">`
+        })
+      } else if (isLight) {
+        bodyHtml = bodyHtml.replace(/data-ix-color-schema="[^"]*"/g, 'data-ix-color-schema="light"')
+      }
+      const data = req.schema.parse({
+        bodyHtml,
+        css: '',
+        summary: isDark ? 'Converted screen to dark mode using Siemens iX tokens' : 'Revised screen for testing',
+        theme: isDark ? 'dark' : 'light',
+      })
+      return { data, usage: use }
+    }
+
+    const mockData: Record<string, unknown> = {
+      notes: 'Generated in test mode',
+      screens: [
+        {
+          id: 'test-screen-1',
+          title: 'Test Screen',
+          purpose: 'Test screen generated locally',
+          bodyHtml: '<ix-application><ix-content-header slot="header" header-title="Test Dashboard"></ix-content-header><ix-content><p>Test content</p></ix-content></ix-application>',
+          css: '',
+          theme: 'light',
+        },
+      ],
+      componentsUsed: ['ix-application', 'ix-content', 'ix-content-header'],
+    }
+    return { data: req.schema.parse(mockData), usage: use }
+  }
+
+  async dispose(): Promise<void> {}
 }

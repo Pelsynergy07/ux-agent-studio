@@ -10,13 +10,17 @@
 //   stages/<phase>/edits/<time>.json data a designer replaced by hand
 //   stages/align/answers.json        answers to the open questions (designer, or an agent from context)
 //   stages/align/answer-sources.json where agent-filled answers came from
-//   context/sources.json             the project's knowledge base: notes and files agents read
+//   context/sources.json             notes and files added to this project only
+//   context/memory.json              facts learnt from the designer (answers, choices, "remember this")
+//
+// <projectsDir>/_library/            the workspace Library, shared by projects through tags
+//   items.json                       metadata; files/<id>.txt holds each item's text
 //   stages/<phase>/screens/v<N>/<id>.html   lo-fi / hi-fi screens per version (kept for comparison)
 //   exports/case-study.json          optional case study
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { STAGE_IDS, type Comment, type ContextSource, type Decision, type Project, type StageId, type StageState } from '../shared/types'
+import { STAGE_IDS, type Comment, type ContextSource, type Decision, type LibraryItem, type Project, type StageId, type StageState } from '../shared/types'
 
 export class Store {
   constructor(public readonly root: string) {
@@ -44,14 +48,14 @@ export class Store {
   private readable(id: string): boolean {
     try {
       const p = JSON.parse(fs.readFileSync(path.join(this.root, id, 'project.json'), 'utf8')) as Partial<Project>
-      return Array.isArray(p.pipeline) && !!p.stages && STAGE_IDS.every((s) => p.stages?.[s]?.status)
+      return Array.isArray(p.pipeline) && p.pipeline.length > 0 && !!p.stages && p.pipeline.every((s) => (STAGE_IDS as readonly string[]).includes(s) && p.stages?.[s]?.status)
     } catch {
       return false
     }
   }
 
   /** Creates the project folder. Gate state and the decision log entry come from the orchestrator. */
-  create(name: string, transcript: string, context: string, pipeline: StageId[], designSystem: string): Project {
+  create(name: string, transcript: string, context: string, pipeline: StageId[], designSystem: string, folder?: string): Project {
     const base =
       name
         .toLowerCase()
@@ -62,14 +66,17 @@ export class Store {
     for (let i = 2; fs.existsSync(path.join(this.root, id)); i++) id = `${base}-${i}`
     const now = new Date().toISOString()
     const stages = Object.fromEntries(STAGE_IDS.map((s) => [s, { id: s, status: 'locked', version: 0 } satisfies StageState])) as Record<StageId, StageState>
-    const project: Project = { id, name, createdAt: now, updatedAt: now, context, designSystem, pipeline, stages }
+    const project: Project = { id, name, createdAt: now, updatedAt: now, context, designSystem, pipeline, stages, folder: folder?.trim() || undefined }
     fs.mkdirSync(this.dir(id), { recursive: true })
     fs.writeFileSync(path.join(this.dir(id), 'transcript.md'), transcript)
     return this.save(project)
   }
 
   get(id: string): Project {
-    return JSON.parse(fs.readFileSync(path.join(this.dir(id), 'project.json'), 'utf8'))
+    const p: Project = JSON.parse(fs.readFileSync(path.join(this.dir(id), 'project.json'), 'utf8'))
+    // Phases added in later versions get an empty state, so older projects keep working.
+    for (const s of STAGE_IDS) p.stages[s] ??= { id: s, status: 'locked', version: 0 }
+    return p
   }
 
   save(p: Project): Project {
@@ -110,24 +117,147 @@ export class Store {
     fs.writeFileSync(path.join(d, `${new Date().toISOString().replace(/[:.]/g, '-')}.json`), JSON.stringify(data, null, 2))
   }
 
-  answers(id: string): Record<string, string> {
-    const f = path.join(this.stageDir(id, 'align'), 'answers.json')
-    return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {}
+  /** Answers to a phase's questions (Brief, or Align in older projects), keyed by question id. */
+  answers(id: string, stage: StageId = 'align'): Record<string, string> {
+    return this.readJson(path.join(this.stageDir(id, stage), 'answers.json'), {})
   }
 
-  writeAnswers(id: string, answers: Record<string, string>): void {
-    fs.mkdirSync(this.stageDir(id, 'align'), { recursive: true })
-    fs.writeFileSync(path.join(this.stageDir(id, 'align'), 'answers.json'), JSON.stringify(answers, null, 2))
+  writeAnswers(id: string, answers: Record<string, string>, stage: StageId = 'align'): void {
+    this.writeJson(path.join(this.stageDir(id, stage), 'answers.json'), answers)
   }
 
-  answerSources(id: string): Record<string, string> {
-    const f = path.join(this.stageDir(id, 'align'), 'answer-sources.json')
-    return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {}
+  answerSources(id: string, stage: StageId = 'align'): Record<string, string> {
+    return this.readJson(path.join(this.stageDir(id, stage), 'answer-sources.json'), {})
   }
 
-  writeAnswerSources(id: string, sources: Record<string, string>): void {
-    fs.mkdirSync(this.stageDir(id, 'align'), { recursive: true })
-    fs.writeFileSync(path.join(this.stageDir(id, 'align'), 'answer-sources.json'), JSON.stringify(sources, null, 2))
+  writeAnswerSources(id: string, sources: Record<string, string>, stage: StageId = 'align'): void {
+    this.writeJson(path.join(this.stageDir(id, stage), 'answer-sources.json'), sources)
+  }
+
+  setTranscript(id: string, text: string): void {
+    fs.writeFileSync(path.join(this.dir(id), 'transcript.md'), text)
+  }
+
+  memory(id: string): { id: string; text: string; at: string; from: string }[] {
+    return this.readJson(path.join(this.dir(id), 'context', 'memory.json'), [])
+  }
+
+  writeMemory(id: string, facts: { id: string; text: string; at: string; from: string }[]): void {
+    this.writeJson(path.join(this.dir(id), 'context', 'memory.json'), facts)
+  }
+
+  // ---------- workspace Library ----------
+
+  private get libDir() {
+    return path.join(this.root, '_library')
+  }
+
+  library(): LibraryItem[] {
+    return this.readJson(path.join(this.libDir, 'items.json'), [])
+  }
+
+  writeLibrary(items: LibraryItem[]): void {
+    this.writeJson(path.join(this.libDir, 'items.json'), items.map(({ usedBy: _, ...i }) => i))
+  }
+
+  /** Folders the designer made for projects in the sidebar hierarchy. */
+  projectFolders(): string[] {
+    return this.readJson(path.join(this.root, '_project_folders.json'), [])
+  }
+
+  writeProjectFolders(folders: string[]): void {
+    this.writeJson(path.join(this.root, '_project_folders.json'), folders)
+  }
+
+  /** Folders the designer made, kept even while empty. */
+  folders(): string[] {
+    return this.readJson(path.join(this.libDir, 'folders.json'), [])
+  }
+
+  writeFolders(folders: string[]): void {
+    this.writeJson(path.join(this.libDir, 'folders.json'), folders)
+  }
+
+  libraryText(itemId: string): string {
+    if (!/^[a-z0-9-]+$/.test(itemId)) throw new Error('Invalid item id')
+    const f = path.join(this.libDir, 'files', `${itemId}.txt`)
+    return fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : ''
+  }
+
+  writeLibraryText(itemId: string, text: string | null): void {
+    if (!/^[a-z0-9-]+$/.test(itemId)) throw new Error('Invalid item id')
+    const f = path.join(this.libDir, 'files', `${itemId}.txt`)
+    if (text === null) return fs.rmSync(f, { force: true })
+    fs.mkdirSync(path.dirname(f), { recursive: true })
+    fs.writeFileSync(f, text)
+  }
+
+  libraryImagesDir(): string {
+    return path.join(this.libDir, 'images')
+  }
+
+  libraryImagePath(itemId: string): string | null {
+    if (!/^[a-z0-9-]+$/.test(itemId)) return null
+    const dir = this.libraryImagesDir()
+    if (!fs.existsSync(dir)) return null
+    const file = fs.readdirSync(dir).find((f) => f.startsWith(`${itemId}.`))
+    return file ? path.join(dir, file) : null
+  }
+
+  writeLibraryImage(itemId: string, ext: string, buffer: Buffer): string {
+    if (!/^[a-z0-9-]+$/.test(itemId)) throw new Error('Invalid item id')
+    const cleanExt = ext.replace(/^\./, '').toLowerCase() || 'png'
+    const dir = this.libraryImagesDir()
+    fs.mkdirSync(dir, { recursive: true })
+    // Delete any older file with different extension
+    const existing = this.libraryImagePath(itemId)
+    if (existing) fs.rmSync(existing, { force: true })
+    const filename = `${itemId}.${cleanExt}`
+    fs.writeFileSync(path.join(dir, filename), buffer)
+    return filename
+  }
+
+  deleteLibraryImage(itemId: string): void {
+    const p = this.libraryImagePath(itemId)
+    if (p) fs.rmSync(p, { force: true })
+  }
+
+  contextImagesDir(projectId: string): string {
+    return path.join(this.dir(projectId), 'context', 'images')
+  }
+
+  contextImagePath(projectId: string, sourceId: string): string | null {
+    if (!/^[a-z0-9-]+$/.test(sourceId)) return null
+    const dir = this.contextImagesDir(projectId)
+    if (!fs.existsSync(dir)) return null
+    const file = fs.readdirSync(dir).find((f) => f.startsWith(`${sourceId}.`))
+    return file ? path.join(dir, file) : null
+  }
+
+  writeContextImage(projectId: string, sourceId: string, ext: string, buffer: Buffer): string {
+    if (!/^[a-z0-9-]+$/.test(sourceId)) throw new Error('Invalid source id')
+    const cleanExt = ext.replace(/^\./, '').toLowerCase() || 'png'
+    const dir = this.contextImagesDir(projectId)
+    fs.mkdirSync(dir, { recursive: true })
+    const existing = this.contextImagePath(projectId, sourceId)
+    if (existing) fs.rmSync(existing, { force: true })
+    const filename = `${sourceId}.${cleanExt}`
+    fs.writeFileSync(path.join(dir, filename), buffer)
+    return filename
+  }
+
+  deleteContextImage(projectId: string, sourceId: string): void {
+    const p = this.contextImagePath(projectId, sourceId)
+    if (p) fs.rmSync(p, { force: true })
+  }
+
+  private readJson<T>(f: string, fallback: T): T {
+    return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : fallback
+  }
+
+  private writeJson(f: string, data: unknown): void {
+    fs.mkdirSync(path.dirname(f), { recursive: true })
+    fs.writeFileSync(f, JSON.stringify(data, null, 2))
   }
 
   sources(id: string): ContextSource[] {

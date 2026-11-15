@@ -19,7 +19,7 @@ export function ago(iso: string): string {
   return ms < 60000 ? 'just now' : `${duration(ms)} ago`
 }
 
-export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+export function Modal({ title, onClose, children, wide, className = '' }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; className?: string }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', k)
@@ -27,13 +27,37 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
   }, [onClose])
   return createPortal(
     <div className="scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`modal ${wide ? 'wide' : ''}`} role="dialog" aria-label={title}>
+      <div className={`modal ${wide ? 'wide' : ''} ${className}`} role="dialog" aria-label={title}>
         <header>
           <h2>{title}</h2>
           <IconButton icon={X} label="Close" onClick={onClose} />
         </header>
         {children}
       </div>
+    </div>,
+    document.body,
+  )
+}
+
+/** A panel that slides in from the right, for things you check while working (sources, the log). */
+export function Drawer({ title, sub, onClose, children }: { title: string; sub?: ReactNode; onClose: () => void; children: ReactNode }) {
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => e.key === 'Escape' && !(e.target as HTMLElement).closest('input, textarea') && onClose()
+    window.addEventListener('keydown', k)
+    return () => window.removeEventListener('keydown', k)
+  }, [onClose])
+  return createPortal(
+    <div className="scrim drawer-scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <aside className="drawer" role="dialog" aria-label={title}>
+        <header>
+          <div>
+            <h2>{title}</h2>
+            {sub && <p className="muted small">{sub}</p>}
+          </div>
+          <IconButton icon={X} label="Close" onClick={onClose} />
+        </header>
+        <div className="drawer-body">{children}</div>
+      </aside>
     </div>,
     document.body,
   )

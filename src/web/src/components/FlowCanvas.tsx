@@ -145,7 +145,17 @@ function Board({ flows, screens, full, setFull }: { flows: Flow[]; screens: Map<
   const [focus, setFocus] = useState<string>(flows[0]?.id ?? 'all')
   const zoomTo = (id: string, duration = 450) => {
     setFocus(id)
-    void rf.fitView({ nodes: id === 'all' ? undefined : [{ id: `frame:${id}` }], padding: 0.08, maxZoom: 1.1, duration })
+    if (id === 'all') return void rf.fitView({ padding: 0.08, maxZoom: 1.1, duration })
+    // Fit the flow; if that makes labels too small to read, start at its left edge at a readable size.
+    const frame = rf.getNode(`frame:${id}`)
+    const box = document.querySelector('.fcanvas .react-flow')?.getBoundingClientRect()
+    const w = Number(frame?.style?.width ?? 0)
+    const h = Number(frame?.style?.height ?? 0)
+    if (frame && box && w && box.width / w < 0.7) {
+      const zoom = 0.8
+      return void rf.setViewport({ x: -frame.position.x * zoom + 24, y: box.height / 2 - (frame.position.y + h / 2) * zoom, zoom }, { duration })
+    }
+    void rf.fitView({ nodes: [{ id: `frame:${id}` }], padding: 0.08, maxZoom: 1.1, duration })
   }
   // The first fit is React Flow's own (it waits for measured boxes); later ones follow full screen.
   const first = useRef(true)
@@ -234,4 +244,47 @@ export function FlowCanvas({ flows, screens }: { flows: Flow[]; screens: { id: s
   ) : (
     board
   )
+}
+
+/**
+ * Reads an older Mermaid flowchart into the same flow graph, so drafts made before flow boards still
+ * get the canvas. Handles node shapes ([], (), {}, ([ ])), `-->`, `-- label -->` and `-->|label|`.
+ */
+export function mermaidToFlow(src: string, name = 'Main flow'): Flow | null {
+  const nodes = new Map<string, FlowNode>()
+  const edges: Flow['edges'] = []
+  const node = (tok: string) => {
+    const m = /^([A-Za-z0-9_]+)\s*(?:(\(\[|\[\[|\(\(|\[|\(|\{)\s*"?([\s\S]*?)"?\s*(?:\]\)|\]\]|\)\)|\]|\)|\}))?$/.exec(tok.trim())
+    if (!m) return null
+    const [, id, open, label] = m
+    const known = nodes.get(id)
+    if (!known) nodes.set(id, { id, label: label || id, kind: open === '{' ? 'decision' : open === '([' || open === '((' ? 'start' : 'action', screen: '' })
+    else if (label) nodes.set(id, { ...known, label, kind: open === '{' ? 'decision' : known.kind })
+    return id
+  }
+  for (const raw of src.replace(/^```(mermaid)?\s*|```\s*$/g, '').split('\n')) {
+    const line = raw.trim().replace(/;$/, '')
+    if (!line || /^(flowchart|graph|%%|classDef|class |style |linkStyle|subgraph|end$)/.test(line)) continue
+    // `A -- "label" --> B` becomes `A -->|label| B`; then split the chain on arrows.
+    const norm = line.replace(/--\s*"?([^">|-][^">|]*?)"?\s*-->/g, '-->|$1|').replace(/-\.->|==>/g, '-->')
+    const parts = norm.split('-->')
+    let prev: string | null = null
+    for (const part of parts) {
+      const lm = /^\s*\|\s*"?([^|]*?)"?\s*\|\s*([\s\S]*)$/.exec(part)
+      const id = node(lm ? lm[2] : part)
+      if (id && prev) edges.push({ from: prev, to: id, label: lm ? lm[1].trim() : '' })
+      prev = id
+    }
+  }
+  if (!nodes.size) return null
+  const list = [...nodes.values()]
+  const hasOut = new Set(edges.map((e) => e.from))
+  const hasIn = new Set(edges.map((e) => e.to))
+  for (const n of list) {
+    if (n.kind === 'decision') continue
+    if (!hasIn.has(n.id) || n === list[0]) n.kind = 'start'
+    else if (!hasOut.has(n.id)) n.kind = 'end'
+    else if (/error|fail|unavailable|lost|stale/i.test(n.label)) n.kind = 'error'
+  }
+  return { id: 'F1', name, nodes: list, edges }
 }

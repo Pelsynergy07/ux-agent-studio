@@ -8,7 +8,7 @@ import { STAGE_IDS, type AgentDetails, type InstructionPack, type StageId } from
 
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
-export type AgentId = StageId | 'casestudy'
+export type AgentId = StageId | 'casestudy' | 'clarify' | (string & {})
 
 export interface AgentDef {
   id: AgentId
@@ -77,7 +77,16 @@ export function loadAgent(agentsDir: string, id: AgentId): AgentDef {
 
 // ---------- editing agents from the app ----------
 
-export const AGENT_IDS: AgentId[] = [...STAGE_IDS, 'casestudy']
+export const AGENT_IDS: AgentId[] = [...STAGE_IDS, 'clarify', 'casestudy']
+
+export function listAgentIds(agentsDir: string): AgentId[] {
+  if (!fs.existsSync(agentsDir)) return AGENT_IDS
+  const diskIds = fs
+    .readdirSync(agentsDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && !d.name.startsWith('_') && !d.name.startsWith('.') && fs.existsSync(path.join(agentsDir, d.name, 'AGENT.md')))
+    .map((d) => d.name as AgentId)
+  return [...new Set([...AGENT_IDS, ...diskIds])]
+}
 
 /** Everything the Agents page shows for one agent. Structural keys (inputs, design-system access) are read-only. */
 export function agentDetails(agentsDir: string, id: AgentId): AgentDetails {
@@ -85,13 +94,65 @@ export function agentDetails(agentsDir: string, id: AgentId): AgentDetails {
   const { meta, body } = parseFrontmatter(raw)
   const a = loadAgent(agentsDir, id)
   const why = /^#\s*Model routing:.*?Why:\s*(.*)$/m.exec(raw)?.[1]
-  return { id, name: a.name, description: a.description, models: a.models, effort: a.effort, inputs: a.inputs, transcript: a.transcript, designSystem: a.designSystem, decisions: a.decisions, screensFrom: a.screensFrom, modelWhy: why ?? (typeof meta.why === "string" ? meta.why : undefined), prompt: body.trim() }
+  const isCustom = !AGENT_IDS.includes(id) || meta.custom === 'true'
+  return {
+    id,
+    name: a.name,
+    description: a.description,
+    models: a.models,
+    effort: a.effort,
+    inputs: a.inputs,
+    transcript: a.transcript,
+    designSystem: a.designSystem,
+    decisions: a.decisions,
+    screensFrom: a.screensFrom,
+    modelWhy: why ?? (typeof meta.why === 'string' ? meta.why : undefined),
+    prompt: body.trim(),
+    custom: isCustom,
+  }
 }
 
+export function createAgent(
+  agentsDir: string,
+  input: { id: string; name: string; description: string; models: string[]; effort?: Effort; prompt: string },
+): AgentDetails {
+  const id = input.id.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)
+  if (!id) throw new Error('Give the agent an ID (e.g. accessibility-critic).')
+  const dir = path.join(agentsDir, id)
+  if (fs.existsSync(dir)) throw new Error(`An agent with ID “${id}” already exists.`)
+  fs.mkdirSync(dir, { recursive: true })
+  const models = input.models.filter(Boolean).length ? input.models.filter(Boolean) : ['claude-sonnet-5.5', 'gpt-5.5']
+  const effort = input.effort || 'medium'
+  const content = `---
+name: ${input.name.trim() || id}
+description: ${input.description.trim()}
+inputs: [understand, align]
+transcript: true
+decisions: false
+design_system: guide
+models: [${models.join(', ')}]
+effort: ${effort}
+custom: true
+---
+
+${input.prompt.trim() || 'You are a specialized UX assistant.'}
+`
+  fs.writeFileSync(path.join(dir, 'AGENT.md'), content)
+  return agentDetails(agentsDir, id as AgentId)
+}
+
+export function deleteAgent(agentsDir: string, id: AgentId): void {
+  const dir = path.join(agentsDir, id)
+  const file = path.join(dir, 'AGENT.md')
+  if (fs.existsSync(file)) {
+    backup(agentsDir, `${id}.md`, fs.readFileSync(file, 'utf8'))
+  }
+  fs.rmSync(dir, { recursive: true, force: true })
+}
 
 /** Rewrites an agent's editable fields and prompt; keeps every other frontmatter line as it was. Backs up first. */
 export function saveAgent(agentsDir: string, id: AgentId, patch: { name?: string; description?: string; models?: string[]; effort?: Effort | ''; prompt?: string }): void {
-  if (!AGENT_IDS.includes(id)) throw new Error(`Unknown agent: ${id}`)
+  if (!listAgentIds(agentsDir).includes(id)) throw new Error(`Unknown agent: ${id}`)
   const file = path.join(agentsDir, id, 'AGENT.md')
   const src = fs.readFileSync(file, 'utf8')
   backup(agentsDir, `${id}.md`, src)

@@ -24,37 +24,103 @@ const LABEL: Record<Decision['action'], string> = {
   stakeholder_verdict: 'Stakeholder decision',
   signed_off: 'Signed off',
   note: 'Decision',
-  context: 'Context updated',
+  context: 'Sources updated',
+  chosen: 'Concept chosen',
+  clarified: 'Clarified',
   exported: 'Exported',
   cancelled: 'Cancelled',
   error: 'Failed',
 }
 
 /** Actions that change direction are shown by default; agent bookkeeping is under "Everything". */
-const STEERING = new Set<Decision['action']>(['created', 'pipeline', 'changes_requested', 'edited', 'answered', 'commented', 'approved', 'reopened', 'shared', 'note', 'context', 'stakeholder_verdict', 'signed_off'])
+const STEERING = new Set<Decision['action']>([
+  'created',
+  'pipeline',
+  'changes_requested',
+  'edited',
+  'answered',
+  'commented',
+  'approved',
+  'reopened',
+  'shared',
+  'note',
+  'context',
+  'chosen',
+  'clarified',
+  'stakeholder_verdict',
+  'signed_off',
+])
 type Filter = 'steering' | 'stakeholders' | 'all'
 
-export function DecisionLog({ projectId, stage, decisions, stages, open, onClose, onChange }: { projectId: string; stage: StageId; decisions: Decision[]; stages: StageMeta[]; open: boolean; onClose: () => void; onChange: () => void }) {
+export function DecisionLog({
+  projectId,
+  stage,
+  decisions,
+  stages,
+  open,
+  onClose,
+  onChange,
+}: {
+  projectId: string
+  stage: StageId
+  decisions: Decision[]
+  stages: StageMeta[]
+  open: boolean
+  onClose: () => void
+  onChange: () => void
+}) {
   const [filter, setFilter] = useState<Filter>('steering')
+  const [items, setItems] = useState<Decision[]>(decisions)
   const [note, setNote] = useState('')
   const [writing, setWriting] = useState(false)
+  const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
+
+  useEffect(() => {
+    setItems(decisions)
+  }, [decisions])
+
   useEffect(() => {
     if (!open) return
     const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
   }, [open, onClose])
+
   const shown = useMemo(
     () =>
-      decisions
+      items
         .map((d, i) => ({ d, i }))
         .filter(({ d }) => (filter === 'all' ? true : filter === 'stakeholders' ? d.by === 'stakeholder' : STEERING.has(d.action)))
         .reverse(),
-    [decisions, filter],
+    [items, filter],
   )
+
   const where = (s: Decision['stage']) => (s === 'project' ? 'Project' : (stages.find((x) => x.id === s)?.title ?? s))
+
+  const handleAddNote = async () => {
+    const text = note.trim()
+    if (!text || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      await api.addNote(projectId, stage, text)
+      setNote('')
+      setWriting(false)
+      // If user was on stakeholders filter, switch to steering so the new note is visible
+      if (filter === 'stakeholders') setFilter('steering')
+      // Immediately pull fresh decisions to render instantly
+      const fresh = await api.getDecisions(projectId).catch(() => null)
+      if (fresh) setItems(fresh)
+      onChange()
+    } catch (e) {
+      setError(cleanError(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   if (!open) return null
 
   return createPortal(
@@ -62,11 +128,26 @@ export function DecisionLog({ projectId, stage, decisions, stages, open, onClose
       <div className="drawer-scrim" onClick={onClose} />
       <aside className="drawer" aria-label="Decision log">
         <header className="drawer-head">
-          <div>
+          <div className="drawer-head-text">
             <h3>Decision log</h3>
             <p className="muted small">Who steered what, and why.</p>
           </div>
-          <IconButton icon={X} label="Close (Esc)" onClick={onClose} />
+          <div className="drawer-head-actions">
+            {!writing && (
+              <Button
+                variant="primary"
+                size="sm"
+                icon={Plus}
+                onClick={() => {
+                  setWriting(true)
+                  setError(null)
+                }}
+              >
+                Log decision
+              </Button>
+            )}
+            <IconButton icon={X} label="Close (Esc)" onClick={onClose} />
+          </div>
         </header>
         <div className="drawer-tabs">
           <Tabs
@@ -82,45 +163,65 @@ export function DecisionLog({ projectId, stage, decisions, stages, open, onClose
           />
         </div>
         <div className="drawer-body">
-          {writing ? (
-            <div className="log-note">
-              <textarea className="input" autoFocus rows={3} placeholder="e.g. Leadership agreed to defer shelving to Q3." value={note} onChange={(e) => setNote(e.target.value)} />
+          {writing && (
+            <div className="log-composer">
+              <textarea
+                className="input"
+                autoFocus
+                rows={3}
+                placeholder="What was decided? e.g. Leadership agreed to defer shelving to Q3."
+                value={note}
+                onChange={(e) => {
+                  setNote(e.target.value)
+                  if (error) setError(null)
+                }}
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                    e.preventDefault()
+                    void handleAddNote()
+                  }
+                  if (e.key === 'Escape') {
+                    setWriting(false)
+                    setError(null)
+                  }
+                }}
+              />
               {error && <span className="danger-text small">{error}</span>}
-              <div className="row end">
-                <Button variant="ghost" size="sm" onClick={() => setWriting(false)}>
+              <div className="row end" style={{ gap: '8px' }}>
+                <span className="muted small" style={{ marginRight: 'auto', fontSize: '11.5px' }}>
+                  ⌘ + Enter to log
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => {
+                    setWriting(false)
+                    setError(null)
+                  }}
+                >
                   Cancel
                 </Button>
                 <Button
                   variant="primary"
                   size="sm"
-                  disabled={!note.trim()}
-                  onClick={async () => {
-                    try {
-                      await api.addNote(projectId, stage, note)
-                      setNote('')
-                      setWriting(false)
-                      onChange()
-                    } catch (e) {
-                      setError(cleanError(e))
-                    }
-                  }}
+                  loading={busy}
+                  disabled={!note.trim() || busy}
+                  onClick={() => void handleAddNote()}
                 >
-                  Log decision
+                  Save decision
                 </Button>
               </div>
             </div>
-          ) : (
-            <Button variant="secondary" icon={Plus} className="log-add" onClick={() => setWriting(true)}>
-              Log a decision
-            </Button>
           )}
+
           <ol className="log-list">
             {shown.length === 0 && <li className="muted small">Nothing here yet.</li>}
             {shown.map(({ d, i }) => {
               const more = !!d.details && d.details !== d.note
               const isOpen = expanded.has(i)
               return (
-                <li key={i} className={`entry a-${d.action} by-${d.by}`}>
+                <li key={`${d.at}-${i}`} className={`entry a-${d.action} by-${d.by}`}>
                   <div className="entry-head">
                     <span className="entry-what">{LABEL[d.action]}</span>
                     <span className="entry-when" title={new Date(d.at).toLocaleString()}>

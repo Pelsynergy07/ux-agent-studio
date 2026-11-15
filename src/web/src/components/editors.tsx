@@ -208,9 +208,12 @@ export function ETable<T extends Record<string, unknown>>({
   noun = 'row',
   nounPlural,
   defaultOpen,
+  bare,
 }: {
   path: string
-  title: string
+  title?: string
+  /** Render the table on its own, without the collapsible section (when a Section already titles it). */
+  bare?: boolean
   columns: { key: keyof T & string; label: string; width?: string; options?: string[] }[]
   rowLabel: (row: T) => string
   newRow?: () => T
@@ -220,8 +223,8 @@ export function ETable<T extends Record<string, unknown>>({
 }) {
   const { data, editable, edit } = usePhase()
   const rows: T[] = getPath(data, path) ?? []
-  return (
-    <Fold title={title} summary={rows.length ? plural(rows.length, noun, nounPlural) : 'None'} path={path} defaultOpen={defaultOpen}>
+  const body = (
+    <>
       <div className="table-wrap">
         <table className="etable">
           <thead>
@@ -270,6 +273,12 @@ export function ETable<T extends Record<string, unknown>>({
           <Plus aria-hidden="true" /> Add {noun}
         </button>
       )}
+    </>
+  )
+  if (bare) return rows.length || editable ? body : <p className="muted small">None</p>
+  return (
+    <Fold title={title ?? path} summary={rows.length ? plural(rows.length, noun, nounPlural) : 'None'} path={path} defaultOpen={defaultOpen}>
+      {body}
     </Fold>
   )
 }

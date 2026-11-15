@@ -14,9 +14,10 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { AGENT_IDS, agentDetails, deletePack, listPacks, loadAgent, readShared, saveAgent, savePack, saveShared, type Effort } from '../core/agents'
+import { AGENT_IDS, agentDetails, createAgent, deleteAgent, deletePack, listAgentIds, listPacks, loadAgent, readShared, saveAgent, savePack, saveShared, type Effort } from '../core/agents'
 import { loadDesignSystems, IX_CDN, IX_ICONS_CDN } from '../core/designSystems'
-import { CopilotProvider } from '../core/llm'
+import { buildCaseStudyFiles } from '../core/caseStudyFiles'
+import { CopilotProvider, MockLLM, type LLMProvider } from '../core/llm'
 import { computeMetrics, snapshot } from '../core/metrics'
 import { Orchestrator } from '../core/orchestrator'
 import { STAGES } from '../core/pipeline'
@@ -45,6 +46,8 @@ const defaults: Settings = {
   firstRunAt: '',
   onboardedAt: '',
   telemetry: true,
+  budgetUsd: 85,
+  requestPrice: 0.04,
 }
 let settings: Settings = { ...defaults, ...readJson(settingsFile) }
 if (!settings.installId) {
@@ -84,7 +87,8 @@ const ixDist = path.join(ROOT, 'node_modules', '@siemens', 'ix', 'dist')
 const ixIconsRoot = path.join(ROOT, 'node_modules', '@siemens', 'ix-icons')
 const agentsDir = path.join(ROOT, 'agents')
 const designSystems = loadDesignSystems(path.join(ROOT, 'design-systems'), ixDist)
-const llm = new CopilotProvider(() => copilotToken)
+const useMock = argv('--mock') !== null || process.env.MOCK_LLM === '1'
+const llm: LLMProvider = useMock ? new MockLLM() : new CopilotProvider(() => copilotToken)
 const clients = new Set<http.ServerResponse>()
 const emit = (e: AgentEvent) => {
   for (const c of clients) c.write(`data: ${JSON.stringify(e)}\n\n`)
@@ -94,7 +98,38 @@ let orch = makeOrchestrator()
 orch.recoverInterrupted()
 
 function makeOrchestrator() {
-  return new Orchestrator({ store, llm, agentsDir, designSystems, modelOverride: () => settings.model, autoRunNext: () => settings.autoRunNext, emit })
+  return new Orchestrator({
+    store,
+    llm,
+    agentsDir,
+    designSystems,
+    modelOverride: () => settings.model,
+    autoRunNext: () => settings.autoRunNext,
+    emit,
+    budget: () => ({ budgetUsd: settings.budgetUsd || 85, requestPrice: settings.requestPrice || 0.04 }),
+    githubUsed: () => githubUsage.value,
+  })
+}
+
+// ---------- this month's Copilot usage from GitHub ----------
+// Only with the designer's own fine-grained token, and only if it may read billing ("Plan: read").
+// Any failure (permission, network, plan) quietly leaves the app's own count in charge.
+const githubUsage: { value: number | null; at: number; login?: string } = { value: null, at: 0 }
+async function refreshGithubUsage() {
+  if (!copilotToken || Date.now() - githubUsage.at < 10 * 60_000) return
+  githubUsage.at = Date.now()
+  try {
+    const gh = (u: string) => fetch(`https://api.github.com${u}`, { headers: { Authorization: `Bearer ${copilotToken}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }, signal: AbortSignal.timeout(8000) })
+    githubUsage.login ??= ((await (await gh('/user')).json()) as { login?: string }).login
+    if (!githubUsage.login) throw new Error('no login')
+    const d = new Date()
+    const res = await gh(`/users/${githubUsage.login}/settings/billing/premium_request/usage?year=${d.getUTCFullYear()}&month=${d.getUTCMonth() + 1}`)
+    if (!res.ok) throw new Error(String(res.status))
+    const body = (await res.json()) as { usageItems?: { grossQuantity?: number; product?: string }[] }
+    githubUsage.value = (body.usageItems ?? []).filter((i) => !i.product || /copilot/i.test(i.product)).reduce((n, i) => n + (i.grossQuantity ?? 0), 0)
+  } catch {
+    githubUsage.value = null
+  }
 }
 
 // ---------- anonymous usage counts ----------
@@ -126,31 +161,64 @@ const lanAddresses = () =>
     .filter((a): a is os.NetworkInterfaceInfo => !!a && a.family === 'IPv4' && !a.internal)
     .map((a) => a.address)
 
+function openFolder(dir: string) {
+  fs.mkdirSync(dir, { recursive: true })
+  const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open'
+  spawn(cmd, [dir], { detached: true, stdio: 'ignore' }).unref()
+}
+
 // Long-running agent calls return immediately and report through /api/events.
 const background = (id: string, stage: string, p: Promise<unknown>) =>
   void p.catch((e) => emit({ projectId: id, stage: stage as AgentEvent['stage'], kind: 'error', message: (e as Error).message }))
 
 const api: { [K in keyof UxsApi]: (...a: Parameters<UxsApi[K]>) => unknown } = {
   listProjects: () => orch.summaries(),
-  createProject: (i) => {
-    if (!i.transcript.trim()) throw new Error('Add a transcript first.')
-    return orch.create(i.name.trim() || 'Untitled project', cleanTranscript(i.transcript), i.context ?? '', i.pipeline, i.designSystem)
-  },
+  createProject: (i) => orch.create(i.name.trim() || 'Untitled project', cleanTranscript(i.transcript ?? ''), i.context ?? '', i.pipeline, i.designSystem, i.folder),
+  listProjectFolders: () => orch.projectFolders(),
+  addProjectFolder: (n) => orch.addProjectFolder(n),
+  deleteProjectFolder: (n) => orch.deleteProjectFolder(n),
+  setProjectFolder: (id, f) => orch.setProjectFolder(id, f),
+  setTranscript: (id, t) => orch.setTranscript(id, cleanTranscript(t)),
   setPipeline: (id, p) => orch.setPipeline(id, p),
   getProject: (id) => orch.project(id),
   deleteProject: (id) => store.delete(id),
   getTranscript: (id) => store.transcript(id),
   getArtifact: (id, s, v) => orch.artifact(id, s, v),
   getDecisions: (id) => store.decisions(id),
-  runStage: (id, s) => background(id, s, orch.run(id, s)),
+  // Budget is checked before going to the background, so the app can offer "Run anyway".
+  runStage: (id, s, o) => (orch.checkBudget(o?.force), background(id, s, orch.run(id, s, undefined, o))),
+  checkReady: (id, s) => orch.checkReady(id, s),
+  answerClarify: (id, s, a) => orch.answerClarify(id, s, a),
+  chooseConcept: (id, c, why) => orch.chooseConcept(id, c, why),
+  exploreMore: (id, d, o) => (orch.checkBudget(o?.force), background(id, 'explore', orch.exploreMore(id, d, o))),
+  getChecklist: (id) => orch.checklist(id),
+  getBudget: async () => (await refreshGithubUsage(), orch.budgetStatus()),
+  listLibrary: () => orch.library(),
+  addLibraryItem: (i) => orch.addLibraryItem({ ...i, text: i.text ?? '' }),
+  updateLibraryItem: (iid, patch) => orch.updateLibraryItem(iid, patch),
+  deleteLibraryItem: (iid) => orch.deleteLibraryItem(iid),
+  addFolder: (n) => orch.addFolder(n),
+  renameFolder: (a, b) => orch.renameFolder(a, b),
+  deleteFolder: (n) => orch.deleteFolder(n),
+  getLibraryText: (iid) => store.libraryText(iid),
+  setSources: (id, src) => orch.setSources(id, src),
+  remember: (id, t) => orch.remember(id, t),
+  forget: (id, f) => orch.forget(id, f),
+  getCaseStudy: (id) => orch.caseStudy(id),
+  saveCaseStudy: (id, md) => orch.saveCaseStudy(id, md),
+  buildCaseStudyFiles: async (id) => {
+    const out = await buildCaseStudyFiles(orch.caseStudyDir(id), orch.caseStudyShots(id, `http://localhost:${PORT}`, `http://localhost:${PREVIEW_PORT}`), (images) => orch.caseStudyMarkdown(id, images))
+    return { ...orch.caseStudy(id), note: out.note }
+  },
+  openCaseStudyFolder: (id) => openFolder(orch.caseStudyDir(id)),
   cancelStage: (id, s) => orch.cancel(id, s),
   approveStage: (id, s, r) => orch.approve(id, s, r),
-  requestChanges: (id, s, fb) => background(id, s, orch.requestChanges(id, s, fb)),
+  requestChanges: (id, s, fb, o) => (orch.checkBudget(o?.force), background(id, s, orch.requestChanges(id, s, fb, o))),
   reopenStage: (id, s, r) => orch.reopen(id, s, r),
   saveData: (id, s, d) => orch.saveData(id, s, d),
   saveAnswers: (id, a) => orch.saveAnswers(id, a),
   getContext: (id) => orch.context(id),
-  addContext: (id, src) => orch.addContext(id, src),
+  addContext: (id, src) => orch.addContext(id, { ...src, text: src.text ?? '', kind: src.kind as 'note' | 'file' }),
   deleteContext: (id, sid) => orch.deleteContext(id, sid),
   answerFromContext: (id, notes) => orch.answerFromContext(id, notes),
   editScreen: (id, s, sid, text, el) => background(id, s, orch.editScreen(id, s, sid, text, el)),
@@ -160,19 +228,18 @@ const api: { [K in keyof UxsApi]: (...a: Parameters<UxsApi[K]>) => unknown } = {
   deleteComment: (id, cid) => orch.deleteComment(id, cid),
   addNote: (id, s, t) => orch.addNote(id, s, t),
   shareForReview: (id) => orch.shareForReview(id),
-  generateCaseStudy: (id) => background(id, 'casestudy', orch.generateCaseStudy(id)),
+  generateCaseStudy: (id) => (orch.checkBudget(), background(id, 'casestudy', orch.generateCaseStudy(id))),
   exportBundle: (id) => orch.exportBundle(id),
-  openProjectFolder: (id) => {
-    const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open'
-    spawn(cmd, [store.dir(id)], { detached: true, stdio: 'ignore' }).unref()
-  },
+  openProjectFolder: (id) => openFolder(store.dir(id)),
   getStages: () => STAGES,
   getAgents: () =>
     ([...STAGES.map((s) => s.id), 'casestudy'] as const).map((id) => {
       const a = loadAgent(agentsDir, id)
       return { stage: id, name: a.name, models: a.models, effort: a.effort, inputs: a.inputs, transcript: a.transcript }
     }),
-  getAgentDetails: () => ({ agents: AGENT_IDS.map((id) => agentDetails(agentsDir, id)), shared: readShared(agentsDir), packs: listPacks(agentsDir) }),
+  getAgentDetails: () => ({ agents: listAgentIds(agentsDir).map((id) => agentDetails(agentsDir, id)), shared: readShared(agentsDir), packs: listPacks(agentsDir) }),
+  createAgent: (agent) => createAgent(agentsDir, { ...agent, effort: agent.effort as Effort | undefined }),
+  deleteAgent: (id) => deleteAgent(agentsDir, id),
   saveAgent: (id, patch) => saveAgent(agentsDir, id, { ...patch, effort: patch.effort as Effort | '' | undefined }),
   saveShared: (text) => saveShared(agentsDir, text),
   savePack: (pack) => savePack(agentsDir, pack),
@@ -216,7 +283,25 @@ const api: { [K in keyof UxsApi]: (...a: Parameters<UxsApi[K]>) => unknown } = {
 
 // ---------- http ----------
 
-const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.woff2': 'font/woff2', '.woff': 'font/woff', '.png': 'image/png', '.ico': 'image/x-icon' }
+const TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
+  '.css': 'text/css',
+  '.svg': 'image/svg+xml',
+  '.json': 'application/json',
+  '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.ico': 'image/x-icon',
+  '.pdf': 'application/pdf',
+  '.zip': 'application/zip',
+  '.md': 'text/markdown; charset=utf-8',
+}
 const isLocal = (req: http.IncomingMessage) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? '')
 const hostOk = (req: http.IncomingMessage) => {
   const host = (req.headers.host ?? '').replace(/:\d+$/, '')
@@ -239,13 +324,13 @@ async function readBody(req: http.IncomingMessage): Promise<unknown[]> {
 }
 
 /** Serves a file under `base`; screen HTML gets local asset URLs, a fidelity switch and optional annotation. */
-function serveFile(res: http.ServerResponse, base: string, rel: string, opts?: { fidelity?: string | null; annotate?: boolean; edit?: boolean; proto?: boolean; link?: boolean }) {
+function serveFile(res: http.ServerResponse, base: string, rel: string, opts?: { fidelity?: string | null; theme?: string | null; annotate?: boolean; edit?: boolean; proto?: boolean; link?: boolean }) {
   const file = path.resolve(base, rel)
   if (!file.startsWith(path.resolve(base) + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return send(res, 404, 'Not found', 'text/plain')
   const type = TYPES[path.extname(file)] ?? 'application/octet-stream'
   if (file.endsWith('.html')) {
     let html = fs.readFileSync(file, 'utf8').replaceAll(IX_CDN, '/vendor/ix').replaceAll(IX_ICONS_CDN, '/vendor/ix-icons')
-    html = orch.screenHtml(html, opts?.fidelity ?? undefined)
+    html = orch.screenHtml(html, opts?.fidelity ?? undefined, opts?.theme ?? undefined)
     if (opts?.annotate) html = html.replace('</body>', `<script>${ANNOTATE_SCRIPT}</script></body>`)
     if (opts?.edit) html = html.replace('</body>', `<script>${EDIT_SCRIPT}</script></body>`)
     if (opts?.proto) html = html.replace('</body>', `<script>${PROTO_SCRIPT}</script></body>`)
@@ -318,7 +403,7 @@ const preview = http.createServer((req, res) => {
       }
       // Text and link editing are designer-only powers: never for remote (stakeholder) requests.
       const q = (k: string) => url.searchParams.get(k) === '1'
-      return serveFile(res, store.dir(projectId), rest.join('/'), { fidelity: url.searchParams.get('fidelity'), annotate: q('annotate'), edit: isLocal(req) && q('edit'), proto: q('proto'), link: isLocal(req) && q('link') })
+      return serveFile(res, store.dir(projectId), rest.join('/'), { fidelity: url.searchParams.get('fidelity'), theme: url.searchParams.get('theme'), annotate: q('annotate'), edit: isLocal(req) && q('edit'), proto: q('proto'), link: isLocal(req) && q('link') })
     }
     if (parts[0] === 'vendor' && parts[1] === 'ix') return serveFile(res, ixDist, parts.slice(2).join('/'))
     if (parts[0] === 'vendor' && parts[1] === 'ix-icons') return serveFile(res, ixIconsRoot, parts.slice(2).join('/'))
@@ -353,6 +438,38 @@ const server = http.createServer(async (req, res) => {
       } catch (e) {
         return send(res, 400, { error: (e as Error).message })
       }
+    }
+
+    // Case study files for the designer to save (this machine only).
+    if (parts[0] === 'download') {
+      if (!isLocal(req)) return send(res, 403, 'Forbidden', 'text/plain')
+      const [, projectId, file] = parts
+      if (!/^case-study\.(md|pdf|zip)$/.test(file ?? '')) return send(res, 404, 'Not found', 'text/plain')
+      const f = path.join(orch.caseStudyDir(projectId), file)
+      if (!fs.existsSync(f)) return send(res, 404, 'Not found', 'text/plain')
+      res.writeHead(200, { 'Content-Type': TYPES[path.extname(f)] ?? 'application/octet-stream', 'Content-Disposition': `attachment; filename="${projectId}-${file}"`, 'Cache-Control': 'no-store' })
+      return fs.createReadStream(f).pipe(res)
+    }
+
+    // UI Reference Images: Library images
+    if (parts[0] === 'api' && parts[1] === 'library' && parts[2] === 'images') {
+      const file = parts.slice(3).join('/')
+      if (!/^[a-z0-9_.-]+$/i.test(file)) return send(res, 400, 'Invalid filename', 'text/plain')
+      const f = path.join(store.libraryImagesDir(), file)
+      if (!fs.existsSync(f)) return send(res, 404, 'Not found', 'text/plain')
+      res.writeHead(200, { 'Content-Type': TYPES[path.extname(f).toLowerCase()] ?? 'image/png', 'Cache-Control': 'public, max-age=86400' })
+      return fs.createReadStream(f).pipe(res)
+    }
+
+    // UI Reference Images: Project context images
+    if (parts[0] === 'api' && parts[1] === 'projects' && parts[3] === 'context' && parts[4] === 'images') {
+      const projectId = parts[2]
+      const file = parts.slice(5).join('/')
+      if (!/^[a-z0-9_.-]+$/i.test(file)) return send(res, 400, 'Invalid filename', 'text/plain')
+      const f = path.join(store.contextImagesDir(projectId), file)
+      if (!fs.existsSync(f)) return send(res, 404, 'Not found', 'text/plain')
+      res.writeHead(200, { 'Content-Type': TYPES[path.extname(f).toLowerCase()] ?? 'image/png', 'Cache-Control': 'public, max-age=86400' })
+      return fs.createReadStream(f).pipe(res)
     }
 
     // Stakeholder review API: token-scoped, read + comment + verdict only.
@@ -396,6 +513,7 @@ preview.listen(PREVIEW_PORT, LAN ? '0.0.0.0' : '127.0.0.1')
 server.listen(PORT, LAN ? '0.0.0.0' : '127.0.0.1', () => {
   const url = `http://localhost:${PORT}`
   console.log(`\n  UX Agent Studio is running at ${url}`)
+  if (useMock) console.log('  [TEST MODE] Mock LLM active (--mock): screen edits run locally without external tokens.')
   if (LAN) console.log(`  Stakeholder review links work on: ${lanAddresses().map((a) => `http://${a}:${PORT}`).join(', ')}`)
   console.log(`  Projects: ${settings.projectsDir}\n`)
   if (!arg('--no-open') && !DEV) {

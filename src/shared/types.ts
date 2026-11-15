@@ -1,14 +1,17 @@
 // Types shared by the server, the web UI and the MCP server.
 
-/** Pipeline phases in their default order. The case study is an export, not a phase. */
-export const STAGE_IDS = ['understand', 'align', 'shape', 'lofi', 'hifi'] as const
+/**
+ * Every phase the app knows. New projects use Brief → Concepts (explore) → Flow (shape) → Lo-fi;
+ * Understand and Align are kept so projects made before Brief still open and run.
+ */
+export const STAGE_IDS = ['brief', 'understand', 'align', 'explore', 'shape', 'lofi', 'hifi'] as const
 export type StageId = (typeof STAGE_IDS)[number]
 
 /** Starting points for a project's pipeline. Designers can still toggle and reorder phases. */
 export const PIPELINE_PRESETS: { id: string; name: string; description: string; stages: StageId[] }[] = [
-  { id: 'standard', name: 'Standard', description: 'Understand, align with stakeholders, shape the flow, then a lo-fi for sign-off.', stages: ['understand', 'align', 'shape', 'lofi'] },
-  { id: 'fast', name: 'Fast concept', description: 'Skip alignment. Straight from the meeting to a lo-fi.', stages: ['understand', 'shape', 'lofi'] },
-  { id: 'full', name: 'Through hi-fi', description: 'Standard, plus a polished hi-fi pass after sign-off.', stages: ['understand', 'align', 'shape', 'lofi', 'hifi'] },
+  { id: 'standard', name: 'Standard', description: 'Brief, three concepts, the flow, then a lo-fi for sign-off.', stages: ['brief', 'explore', 'shape', 'lofi'] },
+  { id: 'fast', name: 'Fast', description: 'Skip concepts. From the brief straight to the flow and a lo-fi.', stages: ['brief', 'shape', 'lofi'] },
+  { id: 'full', name: 'Through hi-fi', description: 'Standard, plus a polished hi-fi after sign-off.', stages: ['brief', 'explore', 'shape', 'lofi', 'hifi'] },
 ]
 
 export interface DesignSystemInfo {
@@ -38,6 +41,8 @@ export interface StageState {
   /** True when a designer edited the output after the agent produced it. */
   edited?: boolean
   usage?: RunUsage
+  /** Inputs hash of the last readiness check that found nothing missing (so it isn't repeated). */
+  readyHash?: string
   /** Process id of the app instance running this phase (so a second instance doesn't treat it as crashed). */
   runner?: number
 }
@@ -47,6 +52,8 @@ export interface Project {
   name: string
   createdAt: string
   updatedAt: string
+  /** Optional folder for grouping projects in the sidebar workspace hierarchy. */
+  folder?: string
   /** Free-text context from the designer (product area, constraints, links). */
   context: string
   /** Design system the flow and screens must be built from. */
@@ -58,16 +65,45 @@ export interface Project {
   review?: StakeholderReview
   /** Set when the lo-fi gets stakeholder sign-off: kickoff → this is the turnaround time. */
   signedOffAt?: string
+  /** What this project reads from the Library: items with these tags, plus pinned, minus excluded. */
+  sources?: ProjectSources
 }
 
-/** A note or file in the project's knowledge base. Agents get the parts relevant to their phase. */
+export interface ProjectSources {
+  tags: string[]
+  pinned: string[]
+  excluded: string[]
+}
+
+/** A file, note or UI reference image in the workspace Library, shared across projects through tags. */
+export interface LibraryItem {
+  id: string
+  title: string
+  kind: 'note' | 'file' | 'image'
+  tags: string[]
+  /** Folder in the Library ("" = not in a folder). */
+  folder?: string
+  words: number
+  addedAt: string
+  /** Projects that currently read this item. */
+  usedBy?: number
+  imageUrl?: string
+  mimeType?: string
+}
+
+/** A note, file, or UI reference image in the project's knowledge base. Agents get the parts relevant to their phase. */
 export interface ContextSource {
   id: string
   title: string
-  kind: 'note' | 'file'
+  kind: 'note' | 'file' | 'memory' | 'transcript' | 'image'
+  /** project: added to this project only; library: comes from the Library; memory: learnt from the designer. */
+  origin?: 'project' | 'library' | 'memory'
+  tags?: string[]
   text: string
   addedAt: string
   words: number
+  imageUrl?: string
+  mimeType?: string
 }
 
 export interface StakeholderReview {
@@ -87,18 +123,24 @@ export interface ProjectSummary {
   createdAt: string
   updatedAt: string
   state: ProjectState
+  folder?: string
   /** Human description of the next action, e.g. "Review the UX flow". */
   next: string
   progress: number // approved phases / total
   /** Kickoff → stakeholder sign-off in ms (or elapsed so far when not signed off). */
   turnaroundMs: number
   signedOff: boolean
+  /** Each step and where it stands, for the progress marks on project cards. */
+  steps: { id: StageId; status: StageStatus }[]
+  /** The first screen of the latest lo-fi or hi-fi (path on the preview origin), for the card thumbnail. */
+  thumb?: string
 }
 
 export interface Screen {
   id: string
   title: string
   purpose: string
+  theme?: 'light' | 'dark'
   /** Path on the preview origin (see ServerInfo.previewPort). */
   url: string
 }
@@ -162,7 +204,7 @@ export interface AgentInfo {
 
 /** An agent as shown on the Agents page. Inputs and design-system access are structural (read-only). */
 export interface AgentDetails {
-  id: StageId | 'casestudy'
+  id: string
   name: string
   description: string
   models: string[]
@@ -174,6 +216,7 @@ export interface AgentDetails {
   screensFrom?: StageId
   modelWhy?: string
   prompt: string
+  custom?: boolean
 }
 
 /** Extra instructions a team adds on top of the built-in prompts (agents/_custom/<id>.md). */
@@ -202,6 +245,8 @@ export type DecisionAction =
   | 'signed_off' // the lo-fi got stakeholder sign-off
   | 'note' // a decision or direction change logged by the designer
   | 'context' // a note or file added to (or removed from) the project's knowledge base
+  | 'chosen' // the designer picked a concept
+  | 'clarified' // answers to an agent's clarifying questions (or a skip)
   | 'exported'
   | 'cancelled'
   | 'error'
@@ -253,6 +298,41 @@ export interface Settings {
   onboardedAt: string
   /** Share anonymous usage counts (only when the distributor configured an endpoint). */
   telemetry: boolean
+  /** Monthly Copilot budget in USD, and the price of one premium request. */
+  budgetUsd: number
+  requestPrice: number
+}
+
+export interface Budget {
+  month: string
+  budgetUsd: number
+  usedRequests: number
+  usedUsd: number
+  /** github: read from GitHub billing with the designer's token; local: counted by this app only. */
+  source: 'github' | 'local'
+  /** Premium requests one run of each agent usually costs (from past runs; 1 when unknown). */
+  perRun: Record<string, number>
+}
+
+/** Clarifying questions an agent asks before a step, only when something essential is missing. */
+export interface Readiness {
+  ready: boolean
+  questions: { id: string; question: string; why: string }[]
+}
+
+/** Neutral progress facts for the header checklist (computed, no agent). */
+export interface Checklist {
+  items: { id: string; label: string; done: number; total: number }[]
+}
+
+export interface CaseStudyInfo {
+  title?: string
+  tldr?: string
+  markdown?: string
+  writtenAt?: string
+  files: { md?: string; pdf?: string; zip?: string; images: number; at?: string }
+  /** Why images or the PDF are missing, e.g. no Chrome or Edge found. */
+  note?: string
 }
 
 /** Counts derived from project memory. Numbers and fixed ids only: never names, transcripts, comments or screens. */
@@ -331,23 +411,49 @@ export interface ServerInfo {
 /** The API the web UI calls (POST /api/<method>). */
 export interface UxsApi {
   listProjects(): Promise<ProjectSummary[]>
-  createProject(input: { name: string; transcript: string; context: string; pipeline: StageId[]; designSystem: string }): Promise<Project>
+  listProjectFolders(): Promise<string[]>
+  addProjectFolder(name: string): Promise<string[]>
+  deleteProjectFolder(name: string): Promise<string[]>
+  setProjectFolder(id: string, folder: string): Promise<Project>
+  createProject(input: { name: string; transcript?: string; context?: string; pipeline: StageId[]; designSystem: string; folder?: string }): Promise<Project>
   setPipeline(id: string, pipeline: StageId[]): Promise<Project>
   getProject(id: string): Promise<Project>
   deleteProject(id: string): Promise<void>
   getTranscript(id: string): Promise<string>
   getArtifact(id: string, stage: StageId, version?: number): Promise<StageArtifact | null>
   getDecisions(id: string): Promise<Decision[]>
-  runStage(id: string, stage: StageId): Promise<void>
+  runStage(id: string, stage: StageId, opts?: { force?: boolean }): Promise<void>
+  setTranscript(id: string, transcript: string): Promise<Project>
+  checkReady(id: string, stage: StageId): Promise<Readiness>
+  answerClarify(id: string, stage: StageId, answers: { question: string; answer: string }[]): Promise<void>
+  chooseConcept(id: string, conceptId: string, reason?: string): Promise<StageArtifact>
+  exploreMore(id: string, direction: string, opts?: { force?: boolean }): Promise<void>
+  getChecklist(id: string): Promise<Checklist>
+  getBudget(): Promise<Budget>
+  listLibrary(): Promise<{ items: LibraryItem[]; tags: string[]; folders: string[] }>
+  addLibraryItem(item: { title?: string; text?: string; kind: LibraryItem['kind']; tags: string[]; folder?: string; dataUrl?: string; mimeType?: string }): Promise<LibraryItem>
+  updateLibraryItem(itemId: string, patch: { title?: string; tags?: string[]; folder?: string }): Promise<LibraryItem>
+  addFolder(name: string): Promise<string[]>
+  renameFolder(from: string, to: string): Promise<string[]>
+  deleteFolder(name: string): Promise<string[]>
+  deleteLibraryItem(itemId: string): Promise<void>
+  getLibraryText(itemId: string): Promise<string>
+  setSources(id: string, sources: ProjectSources): Promise<Project>
+  remember(id: string, text: string): Promise<void>
+  forget(id: string, factId: string): Promise<void>
+  getCaseStudy(id: string): Promise<CaseStudyInfo>
+  saveCaseStudy(id: string, markdown: string): Promise<CaseStudyInfo>
+  buildCaseStudyFiles(id: string): Promise<CaseStudyInfo>
+  openCaseStudyFolder(id: string): Promise<void>
   cancelStage(id: string, stage: StageId): Promise<void>
   approveStage(id: string, stage: StageId, reason?: string): Promise<Project>
-  requestChanges(id: string, stage: StageId, feedback: string): Promise<void>
+  requestChanges(id: string, stage: StageId, feedback: string, opts?: { force?: boolean }): Promise<void>
   reopenStage(id: string, stage: StageId, reason?: string): Promise<Project>
   saveData(id: string, stage: StageId, data: unknown): Promise<StageArtifact>
   saveAnswers(id: string, answers: Record<string, string>): Promise<StageArtifact>
   /** Knowledge base: notes and files agents read. */
   getContext(id: string): Promise<ContextSource[]>
-  addContext(id: string, source: { title?: string; text: string; kind: ContextSource['kind'] }): Promise<ContextSource[]>
+  addContext(id: string, source: { title?: string; text?: string; kind: 'note' | 'file' | 'image'; dataUrl?: string; mimeType?: string }): Promise<ContextSource[]>
   deleteContext(id: string, sourceId: string): Promise<ContextSource[]>
   /** Align: an agent fills open questions from the knowledge base (and optional new notes, saved to it first). */
   answerFromContext(id: string, notes?: string): Promise<{ artifact: StageArtifact; filled: number }>
@@ -366,6 +472,8 @@ export interface UxsApi {
   getStages(): Promise<StageMeta[]>
   getAgents(): Promise<AgentInfo[]>
   getAgentDetails(): Promise<{ agents: AgentDetails[]; shared: string; packs: InstructionPack[] }>
+  createAgent(agent: { id: string; name: string; description: string; models: string[]; effort?: string; prompt: string }): Promise<AgentDetails>
+  deleteAgent(id: string): Promise<void>
   saveAgent(id: AgentDetails['id'], patch: { name?: string; description?: string; models?: string[]; effort?: string; prompt?: string }): Promise<void>
   saveShared(text: string): Promise<void>
   savePack(pack: Omit<InstructionPack, 'id'> & { id?: string }): Promise<InstructionPack>

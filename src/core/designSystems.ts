@@ -65,18 +65,24 @@ function ixHead(wireframeCss: string) {
 
 let wireframeCache: string | null = null
 
-/** Converts every iX light-theme colour token to grey (same luminance), so lo-fi keeps real spacing,
+/** Converts every iX colour token (light and dark) to grey (same luminance), so lo-fi keeps real spacing,
  *  type and components but reads as a wireframe. Severity colours become greys too. */
 export function ixWireframeCss(ixDist: string): string {
   if (wireframeCache) return wireframeCache
-  const css = fs.readFileSync(path.join(ixDist, 'siemens-ix', 'theme', 'classic-light.css'), 'utf8')
-  const decls = new Map<string, string>()
-  for (const m of css.matchAll(/(--theme-color-[a-z0-9-]+):([^;}]+)/g)) {
-    const grey = toGrey(m[2].trim())
-    if (grey) decls.set(m[1], grey)
+  const parseDecls = (file: string) => {
+    const p = path.join(ixDist, 'siemens-ix', 'theme', file)
+    if (!fs.existsSync(p)) return ''
+    const css = fs.readFileSync(p, 'utf8')
+    const decls = new Map<string, string>()
+    for (const m of css.matchAll(/(--theme-color-[a-z0-9-]+):([^;}]+)/g)) {
+      const grey = toGrey(m[2].trim())
+      if (grey) decls.set(m[1], grey)
+    }
+    return [...decls].map(([k, v]) => `${k}:${v}`).join(';')
   }
-  const body = [...decls].map(([k, v]) => `${k}:${v}`).join(';')
-  wireframeCache = `[data-ix-theme=classic][data-ix-color-schema=light]{${body}}`
+  const light = parseDecls('classic-light.css')
+  const dark = parseDecls('classic-dark.css')
+  wireframeCache = `[data-ix-theme=classic][data-ix-color-schema=light]{${light}}[data-ix-theme=classic][data-ix-color-schema=dark]{${dark}}@media(prefers-color-scheme:dark){[data-ix-theme=classic][data-ix-color-schema=system]{${dark}}}@media not all and (prefers-color-scheme:dark){[data-ix-theme=classic][data-ix-color-schema=system]{${light}}}`
   return wireframeCache
 }
 

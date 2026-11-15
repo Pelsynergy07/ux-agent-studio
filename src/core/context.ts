@@ -5,7 +5,7 @@
 import type { ContextSource } from '../shared/types'
 
 /** Below this, every source goes in whole: retrieval only matters for big knowledge bases. */
-export const CONTEXT_BUDGET = 24_000
+export const CONTEXT_BUDGET = 12_000
 const CHUNK = 1_200
 
 const STOP = new Set(

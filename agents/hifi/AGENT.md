@@ -6,7 +6,7 @@ screens_from: lofi
 transcript: false
 design_system: full
 # Model routing: first available wins. Why: highest-visibility output and strict design-system adherence. Opus, at medium effort because the output is long and the structure is already approved.
-models: [claude-opus-5.5, claude-sonnet-5.5, gpt-5.5]
+models: [claude-sonnet-5.5, gpt-5.5, gemini-3-pro]
 effort: medium
 ---
 

@@ -1,104 +1,177 @@
-import { CountUp } from '../../delight'
-import { EList, EText, ETable, Fold, ListBody, usePhase, CommentButton } from '../editors'
+import { Ban, CheckCheck, CircleHelp, Flag, ListChecks, ListTodo, Plus, Target, Users } from 'lucide-react'
+import { Card, Pill, StatTile, TabCard } from '../../kit/Card'
+import { getPath } from '../../ui'
+import { CommentButton, EText, ListBody, usePhase } from '../editors'
+import { PeopleCard } from './cards'
 
-/** Understand: the gist first (title + problem), everything else one click away. */
+/** Understand (projects made before Brief): calm card layout with top group and two-column grid. */
 export function Understand() {
-  const { data } = usePhase()
-  const musts = data.userStories.filter((s: { priority: string }) => s.priority === 'must').length
+  const { data, editable } = usePhase()
+  const stories: { id: string; story: string; priority: string }[] = data.userStories
+  const reqs: { id: string; requirement: string; kind: string }[] = data.requirements
+  const musts = stories.filter((s) => s.priority === 'must').length
+
   return (
-    <div className="doc">
-      <div className="gist">
-        <h3 className="gist-title">
-          <EText path="title" />
-        </h3>
-        <p className="gist-text">
-          <EText path="problem" multiline />
-        </p>
-        <div className="facts">
-          <span>
-            <b><CountUp value={data.decisions.length} /></b> decided
-          </span>
-          <span>
-            <b><CountUp value={data.openIssues.length} /></b> still open
-          </span>
-          <span>
-            <b><CountUp value={data.userStories.length} /></b> user stories{musts ? ` (${musts} must)` : ''}
-          </span>
-          <span>
-            <b><CountUp value={data.requirements.length} /></b> requirements
-          </span>
-        </div>
+    <div className="steplayout">
+      {/* 4 KPI cards in one single row with 4 columns */}
+      <div className="stiles four-col">
+        <StatTile icon={CheckCheck} label="Decided" value={data.decisions.length} tone="ok" />
+        <StatTile icon={CircleHelp} label="Still open" value={data.openIssues.length} tone={data.openIssues.length ? 'warn' : 'ok'} />
+        <StatTile icon={ListTodo} label="User stories" value={musts ? `${stories.length} · ${musts} must` : stories.length} tone="accent" />
+        <StatTile icon={ListChecks} label="Requirements" value={reqs.length} tone="info" />
       </div>
 
-      <div className="folds">
-        <Fold title="Meeting summary" summary={`${data.keyQuotes.length} quotes`} path="summary">
-          <p className="body-text">
+      {/* Problem and People cards */}
+      <div className="two-col-grid">
+        <Card icon={Target} iconClassName="icon-accent" label="Problem" actions={<CommentButton path="problem" anchor="Problem" />}>
+          <h3 className="doc-title">
+            <EText path="title" />
+          </h3>
+          <p className="lede">
+            <EText path="problem" multiline />
+          </p>
+          <p className="soft">
             <EText path="summary" multiline />
           </p>
-          <div className="quotes">
-            {data.keyQuotes.map((q: { quote: string; speaker: string }, i: number) => (
-              <figure key={i} className="quote item">
-                <blockquote>
-                  “<EText path={`keyQuotes.${i}.quote`} multiline />”
-                </blockquote>
-                <figcaption>
-                  <EText path={`keyQuotes.${i}.speaker`} />
-                  <span className="item-tools">
-                    <CommentButton path={`keyQuotes.${i}`} anchor={`Quote from ${q.speaker}`} />
+        </Card>
+
+        <PeopleCard<{ name: string; role: string }>
+          path="participants"
+          label="In the meeting"
+          icon={Users}
+          iconClassName="icon-info"
+          sub="role"
+          newPerson={editable ? () => ({ name: 'Name', role: 'Role' }) : undefined}
+        />
+      </div>
+
+      <hr className="phase-divider" />
+
+      {/* Supporting details cards */}
+      <div className="two-col-grid">
+        <DecidedOpenCard />
+        <PlanningCard />
+        <StoriesReqsCard />
+        <BoundariesQuotesCard />
+      </div>
+    </div>
+  )
+}
+
+/** Inline list body for use inside TabCard tabs. */
+function ListCardBody({ path, noun = 'item', empty = 'None' }: { path: string; noun?: string; empty?: string }) {
+  const { data, editable, edit } = usePhase()
+  const items: string[] = getPath(data, path) ?? []
+  return (
+    <>
+      {items.length ? <ListBody path={path} items={items} title={path} /> : <p className="muted small">{empty}</p>}
+      {editable && (
+        <button className="add" onClick={() => edit(path, [...items, `New ${noun}`])}>
+          <Plus aria-hidden="true" /> Add {noun}
+        </button>
+      )}
+    </>
+  )
+}
+
+/** Decided + Still open in one tabbed card. */
+function DecidedOpenCard() {
+  const { data } = usePhase()
+  return (
+    <TabCard icon={CheckCheck} iconClassName="icon-success" label="Decisions" tabs={[
+      { id: 'decided', label: 'Decided', count: data.decisions.length, tone: 'ok', body: <ListCardBody path="decisions" noun="decision" /> },
+      { id: 'open', label: 'Still open', count: data.openIssues.length, tone: 'warn', body: <ListCardBody path="openIssues" noun="open issue" empty="Nothing open." /> },
+    ]} />
+  )
+}
+
+/** Goals + Constraints + Assumptions in one tabbed card. */
+function PlanningCard() {
+  const { data } = usePhase()
+  return (
+    <TabCard icon={Flag} iconClassName="icon-purple" label="Planning" tabs={[
+      { id: 'goals', label: 'Goals', count: (data.goals ?? []).length, tone: 'ok', body: <ListCardBody path="goals" noun="goal" /> },
+      { id: 'constraints', label: 'Constraints', count: (data.constraints ?? []).length, tone: 'warn', body: <ListCardBody path="constraints" noun="constraint" /> },
+      { id: 'assumptions', label: 'Assumptions', count: (data.assumptions ?? []).length, tone: 'purple', body: <ListCardBody path="assumptions" noun="assumption" /> },
+    ]} />
+  )
+}
+
+/** User stories + Requirements in one tabbed card. */
+function StoriesReqsCard() {
+  const { data } = usePhase()
+  const stories: { id: string; story: string; priority: string }[] = data.userStories
+  const reqs: { id: string; requirement: string; kind: string }[] = data.requirements
+  return (
+    <TabCard icon={ListTodo} iconClassName="icon-accent" label="Specs" tabs={[
+      {
+        id: 'stories', label: 'User stories', count: stories.length, tone: 'accent', body: (
+          <ul className="rows">
+            {stories.map((u, i) => (
+              <li key={u.id} className="item">
+                <span className="row-num mono">{u.id}</span>
+                <span className="row-main">
+                  <span className="row-sub strong">
+                    <EText path={`userStories.${i}.story`} multiline />
                   </span>
-                </figcaption>
+                </span>
+                <Pill tone={u.priority === 'must' ? 'accent' : 'neutral'}>{u.priority}</Pill>
+                <span className="item-tools">
+                  <CommentButton path={`userStories.${i}`} anchor={`Story ${u.id}`} />
+                </span>
+              </li>
+            ))}
+          </ul>
+        ),
+      },
+      {
+        id: 'reqs', label: 'Requirements', count: reqs.length, tone: 'info', body: (
+          <ul className="rows">
+            {reqs.map((r, i) => (
+              <li key={r.id} className="item">
+                <span className="row-num mono">{r.id}</span>
+                <span className="row-main">
+                  <span className="row-sub strong">
+                    <EText path={`requirements.${i}.requirement`} multiline />
+                  </span>
+                </span>
+                <Pill>{r.kind === 'functional' ? 'Functional' : 'Non-functional'}</Pill>
+                <span className="item-tools">
+                  <CommentButton path={`requirements.${i}`} anchor={`Requirement ${r.id}`} />
+                </span>
+              </li>
+            ))}
+          </ul>
+        ),
+      },
+    ]} />
+  )
+}
+
+/** Not doing + Risks + Quotes in one tabbed card. */
+function BoundariesQuotesCard() {
+  const { data } = usePhase()
+  const quotes: { quote: string; speaker: string }[] = data.keyQuotes ?? []
+  return (
+    <TabCard icon={Ban} iconClassName="icon-danger" label="Risks & boundaries" tabs={[
+      { id: 'nonGoals', label: 'Not doing', count: (data.nonGoals ?? []).length, tone: 'ok', body: <ListCardBody path="nonGoals" noun="item" /> },
+      { id: 'risks', label: 'Risks', count: (data.risks ?? []).length, tone: 'danger', body: <ListCardBody path="risks" noun="risk" /> },
+      ...(quotes.length > 0 ? [{
+        id: 'quotes',
+        label: 'Quotes',
+        count: quotes.length,
+        tone: 'info' as const,
+        body: (
+          <div className="quotes">
+            {quotes.map((q, i) => (
+              <figure key={i} className="quote">
+                <blockquote>“{q.quote}”</blockquote>
+                <figcaption>{q.speaker}</figcaption>
               </figure>
             ))}
           </div>
-        </Fold>
-        <EList path="decisions" title="Decided in the meeting" noun="decision" />
-        <EList path="openIssues" title="Still open" noun="open issue" />
-        <Fold title="Goals and non-goals" summary={`${data.goals.length} goals · ${data.nonGoals.length} non-goals`} path="goals">
-          <div className="split">
-            <div>
-              <h4 className="mini">Goals</h4>
-              <ListBody path="goals" items={data.goals} title="Goal" />
-            </div>
-            <div>
-              <h4 className="mini">Not doing</h4>
-              <ListBody path="nonGoals" items={data.nonGoals} title="Non-goal" />
-            </div>
-          </div>
-        </Fold>
-        <ETable
-          path="userStories"
-          title="User stories"
-          noun="story" nounPlural="stories"
-          rowLabel={(r) => `Story ${r.id}`}
-          columns={[
-            { key: 'id', label: 'ID', width: '70px' },
-            { key: 'story', label: 'Story' },
-            { key: 'priority', label: 'Priority', width: '110px', options: ['must', 'should', 'could'] },
-          ]}
-          newRow={() => ({ id: `US-${data.userStories.length + 1}`, story: 'As a …, I want … so that …', acceptance: [], priority: 'should' })}
-        />
-        <ETable
-          path="requirements"
-          title="Requirements"
-          noun="requirement"
-          rowLabel={(r) => `Requirement ${r.id}`}
-          columns={[
-            { key: 'id', label: 'ID', width: '80px' },
-            { key: 'requirement', label: 'Requirement' },
-            { key: 'kind', label: 'Kind', width: '150px', options: ['functional', 'non-functional'] },
-          ]}
-          newRow={() => ({ id: `FR-${data.requirements.length + 1}`, requirement: 'New requirement', kind: 'functional' })}
-        />
-        <ETable path="participants" title="People in the meeting" noun="person" nounPlural="people" rowLabel={(r) => `Participant ${r.name}`} columns={[{ key: 'name', label: 'Name' }, { key: 'role', label: 'Role' }]} newRow={() => ({ name: 'Name', role: 'Role' })} />
-        <Fold title="Constraints, risks and assumptions" summary={`${data.constraints.length + data.risks.length + data.assumptions.length} items`} path="constraints">
-          <h4 className="mini">Constraints</h4>
-          <ListBody path="constraints" items={data.constraints} title="Constraint" />
-          <h4 className="mini">Risks</h4>
-          <ListBody path="risks" items={data.risks} title="Risk" />
-          <h4 className="mini">Assumptions</h4>
-          <ListBody path="assumptions" items={data.assumptions} title="Assumption" />
-        </Fold>
-      </div>
-    </div>
+        ),
+      }] : []),
+    ]} />
   )
 }

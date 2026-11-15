@@ -24,7 +24,12 @@ export function Settings({ agents, designSystems, onClose }: { agents: AgentInfo
     <Modal title="Settings" onClose={onClose} wide>
       <div className="form">
         <Select label="Default design system" value={s.defaultDesignSystem} onChange={(e) => setS({ ...s, defaultDesignSystem: e.target.value })} options={designSystems.filter((d) => d.renderable).map((d) => ({ value: d.id, label: d.name }))} />
-        <Switch label="Start the next phase automatically after I approve" checked={s.autoRunNext} onChange={(v) => setS({ ...s, autoRunNext: v })} />
+        <Switch label="Start the next step automatically after I approve" checked={s.autoRunNext} onChange={(v) => setS({ ...s, autoRunNext: v })} />
+        <div className="grid2">
+          <Input label="Monthly Copilot budget (USD)" type="number" min={0} step={5} value={String(s.budgetUsd ?? 85)} onChange={(e) => setS({ ...s, budgetUsd: Number(e.target.value) })} hint="New agent work asks first once this is spent." />
+          <Input label="Price per premium request (USD)" type="number" min={0} step={0.01} value={String(s.requestPrice ?? 0.04)} onChange={(e) => setS({ ...s, requestPrice: Number(e.target.value) })} hint="Each agent run usually costs 1 request." />
+        </div>
+        <p className="muted small">The meter uses your GitHub billing when your saved token may read it (fine-grained token with “Plan: read”). Otherwise it counts this app’s runs only.</p>
 
         <div className="folds">
           <Fold title="Models" summary={s.model ? `Override: ${s.model}` : 'Recommended model per agent'}>

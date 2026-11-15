@@ -5,8 +5,8 @@ inputs: [understand]
 transcript: true
 design_system: none
 # Model routing: first available wins. Why: mapping and gap-finding over an approved brief. Judgment, not deep reasoning, so Sonnet at medium effort. Reads the transcript too, to answer questions itself.
-models: [claude-sonnet-5.5, gpt-5.5, claude-opus-5.5]
-effort: medium
+models: [gpt-5.5-mini, gemini-3-flash, claude-haiku-5.5, claude-sonnet-5.5]
+effort: low
 ---
 
 # Alignment Lead

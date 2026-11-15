@@ -1,7 +1,7 @@
 // Screen previews for designers and stakeholders: real design-system screens, scaled from a true
 // desktop viewport, clickable as a prototype (data-goto links). Primary controls: fidelity, comment,
 // studio, present; the rest under "More".
-import { Columns2, Maximize2, MessageSquare, Monitor, MoreHorizontal, MousePointerClick, Palette, ScanLine, Tablet, Wand2 } from 'lucide-react'
+import { Columns2, Maximize2, MessageSquare, Monitor, Moon, MoreHorizontal, MousePointerClick, Palette, ScanLine, Sun, Tablet, Wand2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { Comment, Screen } from '../../../shared/types'
 import { previewOrigin } from '../api'
@@ -34,6 +34,7 @@ interface Props {
 export function ScreenViewer({ screens, previous, version, canSwitchFidelity, comments, onComment, onRemoveComment, query = '', nameField, onOpen }: Props) {
   const [active, setActive] = useState(screens[0]?.id)
   const [fidelity, setFidelity] = useState<'wireframe' | 'full'>('wireframe')
+  const [theme, setTheme] = useState<'light' | 'dark'>(screens[0]?.theme ?? 'light')
   const [viewport, setViewport] = useState<Viewport>('desktop')
   const [commenting, setCommenting] = useState(false)
   const [compare, setCompare] = useState(false)
@@ -47,6 +48,12 @@ export function ScreenViewer({ screens, previous, version, canSwitchFidelity, co
   useEffect(() => {
     if (!screens.find((s) => s.id === active)) setActive(screens[0]?.id)
   }, [screens, active])
+
+  const screen = screens.find((s) => s.id === active)
+
+  useEffect(() => {
+    if (screen?.theme) setTheme(screen.theme)
+  }, [screen?.id, screen?.theme])
 
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
@@ -68,10 +75,9 @@ export function ScreenViewer({ screens, previous, version, canSwitchFidelity, co
     frames.current?.querySelectorAll('iframe').forEach((f) => f.contentWindow?.postMessage({ type: 'uxs-hotspots', on: hotspots }, '*'))
   }, [hotspots])
 
-  const screen = screens.find((s) => s.id === active)
   if (!screen) return <p className="muted">No screens yet.</p>
   const prevScreen = previous?.screens.find((s) => s.id === active)
-  const src = (s: Screen) => `${previewOrigin()}${s.url}?${new URLSearchParams({ fidelity: canSwitchFidelity ? fidelity : '', annotate: commenting ? '1' : '', proto: commenting ? '' : '1' })}${query}`
+  const src = (s: Screen) => `${previewOrigin()}${s.url}?${new URLSearchParams({ fidelity: canSwitchFidelity ? fidelity : '', theme, annotate: commenting ? '1' : '', proto: commenting ? '' : '1' })}${query}`
   const mine = comments.filter((c) => c.screenId === active)
   const openCount = (id: string) => comments.filter((c) => c.screenId === id && !c.sentInVersion).length
   const unsent = mine.filter((c) => !c.sentInVersion).length
@@ -105,6 +111,16 @@ export function ScreenViewer({ screens, previous, version, canSwitchFidelity, co
               ]}
             />
           )}
+          <Segmented
+            label="Theme"
+            size="sm"
+            value={theme}
+            onChange={setTheme}
+            options={[
+              { value: 'light', label: 'Light', icon: Sun },
+              { value: 'dark', label: 'Dark', icon: Moon },
+            ]}
+          />
           {!commenting && links !== null && links > 0 && <IconButton icon={MousePointerClick} label={hotspots ? 'Hide clickable areas' : 'Show clickable areas'} active={hotspots} variant="secondary" onClick={() => setHotspots((h) => !h)} />}
           <IconButton icon={MessageSquare} label={commenting ? 'Stop commenting' : 'Comment on screen'} active={commenting} badge={unsent || undefined} variant="secondary" onClick={() => (setCommenting((c) => !c), setPicked(null))} />
           <Menu

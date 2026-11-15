@@ -1,12 +1,13 @@
-import { Bot, KeyRound, LayoutGrid, Menu as MenuIcon, Plus } from 'lucide-react'
+import { Bot, ChevronRight, Folder, FolderPlus, KeyRound, LayoutGrid, Library as LibraryIcon, Menu as MenuIcon, MoreVertical, Plus, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import type { AgentInfo, AuthInfo, Decision, DesignSystemInfo, Project, ProjectSummary, ServerInfo, Settings as S, StageId, StageMeta } from '../../shared/types'
+import type { AgentInfo, AuthInfo, Budget, Decision, DesignSystemInfo, Project, ProjectSummary, ServerInfo, Settings as S, StageId, StageMeta } from '../../shared/types'
 import { api, onAgentEvent } from './api'
 import { Button, IconButton } from './kit/Button'
 import { Banner } from './kit/Feedback'
 import { AccountBar, TokenDialog, UsageDialog } from './components/Account'
 import { Onboarding } from './components/Onboarding'
 import { Agents } from './pages/Agents'
+import { Library } from './pages/Library'
 import { Home } from './pages/Home'
 import { NewProject } from './pages/NewProject'
 import { ProjectView, type View } from './pages/ProjectView'
@@ -30,12 +31,24 @@ export function App() {
   const [progress, setProgress] = useState<Progress>({})
   const [toast, setToast] = useState<string | null>(null)
   const [dialog, setDialog] = useState<'new' | 'settings' | 'token' | 'stats' | 'tutorial' | null>(null)
-  const [page, setPage] = useState<'projects' | 'agents'>(location.hash.startsWith('#/agents') ? 'agents' : 'projects')
+  const [page, setPage] = useState<Page>(pageOf(location.hash))
+  const [budget, setBudget] = useState<Budget | null>(null)
+  const loadBudget = useCallback(() => api.getBudget().then(setBudget).catch(() => {}), [])
   const [navOpen, setNavOpen] = useState(false)
   const [theme, setTheme] = useState<ThemePref>(readTheme)
   useEffect(() => watchSystemTheme(() => theme), [theme])
 
+  const [projectFolders, setProjectFolders] = useState<string[]>([])
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
+  const [newFolderInputOpen, setNewFolderInputOpen] = useState(false)
+  const [newFolderName, setNewFolderName] = useState('')
+  const [folderMenuOpen, setFolderMenuOpen] = useState<string | null>(null)
+  const [activeKebabProjectId, setActiveKebabProjectId] = useState<string | null>(null)
+  const [draggingProjectId, setDraggingProjectId] = useState<string | null>(null)
+  const [dragOverFolder, setDragOverFolder] = useState<string | null>(null)
+
   const loadProjects = useCallback(() => api.listProjects().then(setProjects), [])
+  const loadProjectFolders = useCallback(() => api.listProjectFolders().then(setProjectFolders).catch(() => {}), [])
   // Agents can be edited on the Agents page; Settings and new projects must show the saved version.
   const loadAgents = useCallback(() => api.getAgents().then(setAgents), [])
   const loadProject = useCallback(async (id: string) => {
@@ -57,16 +70,30 @@ export function App() {
     api.getServerInfo().then(setServer)
     api.getAuth().then(setAuth)
     void loadProjects()
-  }, [loadProjects, loadAgents])
+    void loadProjectFolders()
+    void loadBudget()
+  }, [loadProjects, loadProjectFolders, loadAgents, loadBudget])
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      const t = e.target as HTMLElement
+      if (!t.closest('.side-folder-menu-wrap') && !t.closest('.side-kebab-wrap')) {
+        setFolderMenuOpen(null)
+        setActiveKebabProjectId(null)
+      }
+    }
+    window.addEventListener('click', handleClick)
+    return () => window.removeEventListener('click', handleClick)
+  }, [])
 
   // The URL keeps the open project and phase, so reloads and back/forward work.
   useEffect(() => {
     const route = () => {
       setNavOpen(false)
-      setPage(location.hash.startsWith('#/agents') ? 'agents' : 'projects')
+      setPage(pageOf(location.hash))
       const h = /^#\/p\/([a-z0-9-]+)(?:\/(\w+))?/.exec(location.hash)
       if (!h) return setProject(null)
-      void loadProject(h[1]).then((p) => setStage(h[2] === 'context' ? 'context' : h[2] && p.pipeline.includes(h[2] as StageId) ? (h[2] as StageId) : focusStage(p)))
+      void loadProject(h[1]).then((p) => setStage(h[2] === 'casestudy' ? 'casestudy' : h[2] && p.pipeline.includes(h[2] as StageId) ? (h[2] as StageId) : focusStage(p)))
     }
     route()
     window.addEventListener('hashchange', route)
@@ -108,7 +135,10 @@ export function App() {
           return { ...p, [key]: { message: e.message, chars: e.chars, startedAt: p[key]?.startedAt ?? Date.now() } }
         })
         if (e.kind === 'progress') return
-        if (e.kind === 'done' || e.kind === 'error') setToast(e.kind === 'error' ? `Something went wrong: ${e.message}` : e.message)
+        if (e.kind === 'done' || e.kind === 'error') {
+          setToast(e.kind === 'error' ? `Something went wrong: ${e.message}` : e.message)
+          void loadBudget()
+        }
         void loadProjects()
         if (e.projectId === project?.id) {
           void loadProject(e.projectId)
@@ -119,6 +149,45 @@ export function App() {
     [project?.id, loadProject, loadProjects],
   )
 
+  const handleCreateProjectFolder = async () => {
+    const n = newFolderName.trim()
+    if (!n) return
+    try {
+      const updated = await api.addProjectFolder(n)
+      setProjectFolders(updated)
+      setNewFolderInputOpen(false)
+      setNewFolderName('')
+    } catch {}
+  }
+
+  const handleDeleteProjectFolder = async (name: string) => {
+    if (!confirm(`Delete project folder “${name}”? Projects inside will become unassigned.`)) return
+    try {
+      const updated = await api.deleteProjectFolder(name)
+      setProjectFolders(updated)
+      setFolderMenuOpen(null)
+      void loadProjects()
+    } catch {}
+  }
+
+  const handleMoveProject = async (projectId: string, targetFolder: string) => {
+    try {
+      await api.setProjectFolder(projectId, targetFolder)
+      setActiveKebabProjectId(null)
+      void loadProjects()
+      if (project?.id === projectId) void loadProject(projectId)
+    } catch {}
+  }
+
+  const toggleFolderCollapse = (folderName: string) => {
+    setCollapsedFolders((prev) => {
+      const next = new Set(prev)
+      if (next.has(folderName)) next.delete(folderName)
+      else next.add(folderName)
+      return next
+    })
+  }
+
   const changeTheme = (next: ThemePref, from: { x: number; y: number }) => {
     setTheme(next)
     switchTheme(next, from)
@@ -126,7 +195,7 @@ export function App() {
   const account = (
     <AccountBar auth={auth} theme={theme} onTheme={changeTheme} onTutorial={() => setDialog('tutorial')} onSettings={() => setDialog('settings')} onToken={() => setDialog('token')} onStats={() => setDialog('stats')} />
   )
-  const recent = projects.slice(0, 6)
+  const unorganizedProjects = projects.filter((p) => !p.folder || !projectFolders.includes(p.folder))
 
   return (
     <div className={`shell ${navOpen ? 'nav-open' : ''}`}>
@@ -151,22 +220,302 @@ export function App() {
             Projects
             {projects.length > 0 && <span className="side-count">{projects.length}</span>}
           </a>
+          <a href="#/library" className={page === 'library' ? 'on' : ''}>
+            <LibraryIcon aria-hidden="true" />
+            Library
+          </a>
           <a href="#/agents" className={page === 'agents' ? 'on' : ''}>
             <Bot aria-hidden="true" />
             Agents
           </a>
         </nav>
-        {recent.length > 0 && (
+        {projects.length > 0 && (
           <div className="side-section">
-            <span className="side-label">Recent</span>
-            {recent.map((p) => (
-              <a key={p.id} href={`#/p/${p.id}`} className={`side-project ${project?.id === p.id ? 'on' : ''}`} title={p.next}>
-                <i className={`state-dot s-${p.state}`} aria-hidden="true" />
-                <span>{p.name}</span>
-              </a>
-            ))}
+            <div className="side-section-head">
+              <span className="side-label">Projects</span>
+              <div className="side-head-actions">
+                <button
+                  type="button"
+                  className="side-action-btn"
+                  title="New project folder"
+                  onClick={() => setNewFolderInputOpen((prev) => !prev)}
+                >
+                  <FolderPlus aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+
+            {newFolderInputOpen && (
+              <div className="side-new-folder-row">
+                <Folder aria-hidden="true" className="side-folder-icon folder-accent" />
+                <input
+                  autoFocus
+                  className="side-folder-input"
+                  placeholder="New folder name..."
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void handleCreateProjectFolder()
+                    if (e.key === 'Escape') {
+                      setNewFolderName('')
+                      setNewFolderInputOpen(false)
+                    }
+                  }}
+                  onBlur={() => {
+                    if (!newFolderName.trim()) {
+                      setNewFolderInputOpen(false)
+                    } else {
+                      void handleCreateProjectFolder()
+                    }
+                  }}
+                />
+              </div>
+            )}
+
+            <div className="side-tree">
+              {/* Project folders */}
+              {projectFolders.map((folderName) => {
+                const folderProjects = projects.filter((p) => p.folder === folderName)
+                const isCollapsed = collapsedFolders.has(folderName)
+                const isDragTarget = dragOverFolder === folderName
+                return (
+                  <div
+                    key={folderName}
+                    className={`side-folder-group ${isDragTarget ? 'drag-over' : ''}`}
+                    onDragOver={(e) => {
+                      e.preventDefault()
+                      e.dataTransfer.dropEffect = 'move'
+                      if (dragOverFolder !== folderName) setDragOverFolder(folderName)
+                    }}
+                    onDragLeave={(e) => {
+                      if (e.currentTarget.contains(e.relatedTarget as Node)) return
+                      setDragOverFolder(null)
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      const pId = e.dataTransfer.getData('text/plain')
+                      if (pId) void handleMoveProject(pId, folderName)
+                      setDragOverFolder(null)
+                      setDraggingProjectId(null)
+                    }}
+                  >
+                    <div className="side-folder-row">
+                      <button
+                        type="button"
+                        className="side-folder-toggle"
+                        onClick={() => toggleFolderCollapse(folderName)}
+                        title={isCollapsed ? 'Expand folder' : 'Collapse folder'}
+                      >
+                        <ChevronRight
+                          className={`folder-chevron ${!isCollapsed ? 'expanded' : ''}`}
+                          aria-hidden="true"
+                        />
+                        <Folder aria-hidden="true" className="side-folder-icon" />
+                        <span className="side-folder-title">{folderName}</span>
+                        <span className="side-count">{folderProjects.length}</span>
+                      </button>
+                      <div className="side-folder-menu-wrap">
+                        <button
+                          type="button"
+                          className="side-folder-more"
+                          title="Folder options"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setFolderMenuOpen(folderMenuOpen === folderName ? null : folderName)
+                          }}
+                        >
+                          <MoreVertical aria-hidden="true" />
+                        </button>
+                        {folderMenuOpen === folderName && (
+                          <div className="folder-popover side-folder-popover">
+                            <button
+                              type="button"
+                              className="danger"
+                              onClick={() => void handleDeleteProjectFolder(folderName)}
+                            >
+                              <Trash2 aria-hidden="true" /> Delete folder
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {!isCollapsed && (
+                      <div className="side-folder-items">
+                        {folderProjects.map((p) => (
+                          <div
+                            key={p.id}
+                            className={`side-project-row ${draggingProjectId === p.id ? 'is-dragging' : ''}`}
+                            draggable
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData('text/plain', p.id)
+                              e.dataTransfer.effectAllowed = 'move'
+                              setDraggingProjectId(p.id)
+                            }}
+                            onDragEnd={() => {
+                              setDraggingProjectId(null)
+                              setDragOverFolder(null)
+                            }}
+                          >
+                            <a
+                              href={`#/p/${p.id}`}
+                              className={`side-project ${project?.id === p.id ? 'on' : ''}`}
+                              title={p.next}
+                            >
+                              <span className="side-project-name">{p.name}</span>
+                            </a>
+                            <div className="side-kebab-wrap">
+                              <button
+                                type="button"
+                                className={`side-kebab-btn ${activeKebabProjectId === p.id ? 'active' : ''}`}
+                                title="Project options"
+                                aria-label="Project options"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  setActiveKebabProjectId(activeKebabProjectId === p.id ? null : p.id)
+                                }}
+                              >
+                                <MoreVertical aria-hidden="true" />
+                              </button>
+                              {activeKebabProjectId === p.id && (
+                                <div className="side-kebab-menu" onClick={(e) => e.stopPropagation()}>
+                                  <span className="side-menu-label">Move to folder</span>
+                                  <button
+                                    type="button"
+                                    className={`side-menu-item ${!p.folder ? 'selected' : ''}`}
+                                    onClick={() => void handleMoveProject(p.id, '')}
+                                  >
+                                    <span>Unorganized</span>
+                                  </button>
+                                  {projectFolders.map((f) => (
+                                    <button
+                                      key={f}
+                                      type="button"
+                                      className={`side-menu-item ${p.folder === f ? 'selected' : ''}`}
+                                      onClick={() => void handleMoveProject(p.id, f)}
+                                    >
+                                      <Folder aria-hidden="true" className="side-menu-icon" />
+                                      <span>{f}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                        {folderProjects.length === 0 && (
+                          <span className="side-folder-empty">Drop projects here</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+
+              {/* Unorganized / Other projects */}
+              {unorganizedProjects.length > 0 && (
+                <div
+                  className={`side-folder-group ${dragOverFolder === '__unorganized__' ? 'drag-over' : ''}`}
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                    e.dataTransfer.dropEffect = 'move'
+                    if (dragOverFolder !== '__unorganized__') setDragOverFolder('__unorganized__')
+                  }}
+                  onDragLeave={(e) => {
+                    if (e.currentTarget.contains(e.relatedTarget as Node)) return
+                    setDragOverFolder(null)
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    const pId = e.dataTransfer.getData('text/plain')
+                    if (pId) void handleMoveProject(pId, '')
+                    setDragOverFolder(null)
+                    setDraggingProjectId(null)
+                  }}
+                >
+                  {projectFolders.length > 0 && (
+                    <div className="side-folder-row unassigned-header">
+                      <span className="side-folder-title muted small">Other projects</span>
+                      <span className="side-count">{unorganizedProjects.length}</span>
+                    </div>
+                  )}
+                  <div className="side-folder-items root-items">
+                    {unorganizedProjects.map((p) => (
+                      <div
+                        key={p.id}
+                        className={`side-project-row ${draggingProjectId === p.id ? 'is-dragging' : ''}`}
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('text/plain', p.id)
+                          e.dataTransfer.effectAllowed = 'move'
+                          setDraggingProjectId(p.id)
+                        }}
+                        onDragEnd={() => {
+                          setDraggingProjectId(null)
+                          setDragOverFolder(null)
+                        }}
+                      >
+                        <a
+                          href={`#/p/${p.id}`}
+                          className={`side-project ${project?.id === p.id ? 'on' : ''}`}
+                          title={p.next}
+                        >
+                          <span className="side-project-name">{p.name}</span>
+                        </a>
+                        {projectFolders.length > 0 && (
+                          <div className="side-kebab-wrap">
+                            <button
+                              type="button"
+                              className={`side-kebab-btn ${activeKebabProjectId === p.id ? 'active' : ''}`}
+                              title="Project options"
+                              aria-label="Project options"
+                              onClick={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                setActiveKebabProjectId(activeKebabProjectId === p.id ? null : p.id)
+                              }}
+                            >
+                              <MoreVertical aria-hidden="true" />
+                            </button>
+                            {activeKebabProjectId === p.id && (
+                              <div className="side-kebab-menu" onClick={(e) => e.stopPropagation()}>
+                                <span className="side-menu-label">Move to folder</span>
+                                <button
+                                  type="button"
+                                  className={`side-menu-item ${!p.folder ? 'selected' : ''}`}
+                                  onClick={() => void handleMoveProject(p.id, '')}
+                                >
+                                  <span>Unorganized</span>
+                                </button>
+                                {projectFolders.map((f) => (
+                                  <button
+                                    key={f}
+                                    type="button"
+                                    className={`side-menu-item ${p.folder === f ? 'selected' : ''}`}
+                                    onClick={() => void handleMoveProject(p.id, f)}
+                                  >
+                                    <Folder aria-hidden="true" className="side-menu-icon" />
+                                    <span>{f}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {projects.length === 0 && (
+                <span className="side-empty">No projects yet</span>
+              )}
+            </div>
           </div>
         )}
+        {budget && <BudgetMeter b={budget} onOpen={() => setDialog('settings')} />}
       </aside>
 
       <main className="main">
@@ -187,10 +536,12 @@ export function App() {
         )}
         {page === 'agents' ? (
           <Agents stages={stages} onChange={loadAgents} />
+        ) : page === 'library' ? (
+          <Library />
         ) : project && stages.length ? (
           <ProjectView
             project={project}
-            stage={stage === 'context' || project.pipeline.includes(stage) ? stage : project.pipeline[0]}
+            stage={stage === 'casestudy' || project.pipeline.includes(stage) ? stage : project.pipeline[0]}
             setStage={goStage}
             decisions={decisions}
             stages={stages}
@@ -198,6 +549,7 @@ export function App() {
             designSystems={designSystems}
             progress={progress}
             server={server}
+            budget={budget}
             onBack={goHome}
             onChange={() => (loadProject(project.id), loadProjects())}
             onDeleted={goHome}
@@ -241,17 +593,35 @@ export function App() {
 
 function Brand() {
   return (
-    <a href="#" className="brand" aria-label="UX Agent Studio home">
-      <svg className="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
-        <rect x="1" y="1" width="22" height="22" rx="7" className="bm-bg" />
-        <rect x="6" y="6.5" width="12" height="3" rx="1.5" className="bm-a" />
-        <rect x="6" y="11" width="8" height="3" rx="1.5" className="bm-b" />
-        <rect x="6" y="15.5" width="5" height="3" rx="1.5" className="bm-c" />
-      </svg>
+    <a href="#" className="brand" aria-label="UX Studio home">
       <span className="brand-name">
-        Agent Studio <span className="brand-tag">UX</span>
+        UX Studio
       </span>
     </a>
+  )
+}
+
+type Page = 'projects' | 'agents' | 'library'
+const pageOf = (h: string): Page => (h.startsWith('#/agents') ? 'agents' : h.startsWith('#/library') ? 'library' : 'projects')
+
+/** This month's Copilot spend against the designer's budget. Quiet until it matters. */
+function BudgetMeter({ b, onOpen }: { b: Budget; onOpen: () => void }) {
+  const pct = Math.min(100, (b.usedUsd / Math.max(b.budgetUsd, 0.01)) * 100)
+  return (
+    <button type="button" className={`budget ${pct >= 100 ? 'over' : pct >= 80 ? 'near' : ''}`} onClick={onOpen} title={b.source === 'github' ? 'From your GitHub billing' : 'Counted by this app only'}>
+      <span className="budget-row">
+        <span>This month</span>
+        <span className="mono">
+          ${b.usedUsd.toFixed(2)} <span className="muted">/ ${b.budgetUsd}</span>
+        </span>
+      </span>
+      <span className="budget-bar" aria-hidden="true">
+        <span style={{ width: `${pct}%` }} />
+      </span>
+      <span className="budget-note">
+        {b.usedRequests} requests · {b.source === 'github' ? 'GitHub billing' : 'this app only'}
+      </span>
+    </button>
   )
 }
 
