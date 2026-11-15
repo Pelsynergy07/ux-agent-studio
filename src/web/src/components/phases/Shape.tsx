@@ -56,7 +56,9 @@ function parseSummaryPoints(text: string): { type: 'scope' | 'assumption' | 'poi
 
   return parts.map((p) => {
     if (/^assumption[s]?:/i.test(p)) {
-      return { type: 'assumption', text: p.replace(/^assumption[s]?:\s*/i, '') }
+      const clean = p.replace(/^assumption[s]?:\s*/i, '').trim()
+      const capitalized = clean ? clean.charAt(0).toUpperCase() + clean.slice(1) : clean
+      return { type: 'assumption', text: capitalized }
     }
     if (/^(flows? cover|scope|the \w+ flows? cover)/i.test(p)) {
       return { type: 'scope', text: p }
@@ -113,13 +115,13 @@ function FlowSummary({ summary }: { summary?: string }) {
             <ul className="flow-summary-bullets">
               {points.map((p, i) => (
                 <li key={i} className={`flow-bullet-item ${p.type}`}>
+                  <span className="flow-bullet-text">{p.text}</span>
                   {p.type === 'assumption' && (
                     <span className="flow-badge assumption">Assumption</span>
                   )}
                   {p.type === 'scope' && (
                     <span className="flow-badge scope">Scope</span>
                   )}
-                  <span className="flow-bullet-text">{p.text}</span>
                 </li>
               ))}
             </ul>

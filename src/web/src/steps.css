@@ -586,7 +586,7 @@
 .flow-bullet-item {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 10px;
   font-size: 13px;
   line-height: 1.5;
   color: var(--ink-2);
@@ -611,10 +611,12 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  padding: 1px 6px;
+  padding: 1px 7px;
   border-radius: 4px;
   flex: none;
-  vertical-align: 1px;
+  margin-left: auto;
+  align-self: flex-start;
+  margin-top: 2px;
 }
 .flow-badge.assumption {
   background: var(--warn-soft);
