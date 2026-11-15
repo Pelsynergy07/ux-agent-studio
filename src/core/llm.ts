@@ -263,5 +263,11 @@ export class MockLLM implements LLMProvider {
     return { data: req.schema.parse(mockData), usage: use }
   }
 
+  async check(token: string): Promise<AuthInfo> {
+    return { ok: true, login: 'test-mode', method: 'local-test', source: 'token' }
+  }
+
+  async reset(): Promise<void> {}
+
   async dispose(): Promise<void> {}
 }

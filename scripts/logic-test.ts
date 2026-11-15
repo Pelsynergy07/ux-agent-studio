@@ -100,6 +100,10 @@ class MockLLM implements LLMProvider {
     const data = req.schema.parse(structuredClone(fake[stage])) // proves the fixtures match the real schemas
     return { data, usage: { requestedModel: req.models[0], model: req.models[0], servedModels: ['mock'], effort: req.effort, inputTokens: 10, outputTokens: 10, cacheReadTokens: 0, calls: 1, premiumRequests: 1, durationMs: 1 } }
   }
+  async check() {
+    return { ok: true, source: 'token' as const }
+  }
+  async reset() {}
   async dispose() {}
 }
 
