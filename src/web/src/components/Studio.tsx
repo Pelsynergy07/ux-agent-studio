@@ -5,7 +5,7 @@
 //   Link     – pick a clickable element and choose which screen it opens; saved like a text edit.
 //   Comment  – click an element and leave a comment (for the next revision or for the record).
 //   Present  – true full screen for review meetings: click through or use arrow keys, comment in place.
-import { ArrowRight, ChevronLeft, ChevronRight, Link2, LogOut, Maximize2, MessageSquare, Moon, MousePointerClick, Palette, ScanLine, Sun, Type, Unlink, Wand2, X } from 'lucide-react'
+import { ArrowRight, ChevronLeft, ChevronRight, Link2, LogOut, Maximize2, MessageSquare, Moon, MousePointerClick, Sun, Type, Unlink, Wand2, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Comment, Decision, Project, StageArtifact, StageId } from '../../../shared/types'
@@ -42,7 +42,6 @@ export function Studio({ project, stage, artifact, comments, decisions, running,
   const [index, setIndex] = useState(0)
   const [mode, setMode] = useState<Mode>(editable ? 'edit' : 'comment')
   const [present, setPresent] = useState(false)
-  const [fidelity, setFidelity] = useState<'wireframe' | 'full'>('wireframe')
   const [theme, setTheme] = useState<'light' | 'dark'>(screens[0]?.theme ?? 'light')
   const [target, setTarget] = useState<El | null>(null)
   const [text, setText] = useState('')
@@ -145,7 +144,6 @@ export function Studio({ project, stage, artifact, comments, decisions, running,
   if (!screen) return null
 
   const q = new URLSearchParams({
-    fidelity: isLofi ? fidelity : '',
     theme,
     annotate: mode === 'edit' || mode === 'comment' ? '1' : '',
     edit: mode === 'text' && editable ? '1' : '',
@@ -220,18 +218,6 @@ export function Studio({ project, stage, artifact, comments, decisions, running,
                 { value: 'comment' as Mode, label: 'Comment', icon: MessageSquare },
               ]}
             />
-            {isLofi && (
-              <Segmented
-                label="Fidelity"
-                size="sm"
-                value={fidelity}
-                onChange={setFidelity}
-                options={[
-                  { value: 'wireframe', label: 'Wireframe', icon: ScanLine },
-                  { value: 'full', label: 'Colour', icon: Palette },
-                ]}
-              />
-            )}
             <Segmented
               label="Theme"
               size="sm"
@@ -378,7 +364,6 @@ export function Studio({ project, stage, artifact, comments, decisions, running,
           <span className="tool-sep" aria-hidden="true" />
           <IconButton icon={MessageSquare} label={mode === 'comment' ? 'Back to clicking through' : 'Comment'} active={mode === 'comment'} onClick={() => setMode(mode === 'comment' ? 'play' : 'comment')} />
           <IconButton icon={MousePointerClick} label={hotspots ? 'Hide clickable areas' : 'Show clickable areas'} active={hotspots} onClick={() => setHotspots((h) => !h)} />
-          {isLofi && <IconButton icon={Palette} label={fidelity === 'full' ? 'Show wireframe' : 'Show in colour'} active={fidelity === 'full'} onClick={() => setFidelity(fidelity === 'full' ? 'wireframe' : 'full')} />}
           <Button variant="secondary" size="sm" icon={LogOut} onClick={exitPresent}>
             Exit
           </Button>

@@ -12,7 +12,7 @@ phase, and a designer approves, edits or sends it back before the next phase unl
 transcript + Context → Understand → Align (agent answers from context, designer fills the rest and confirms core flows) → Shape (flow canvas) → Lo-fi → stakeholder sign-off → (Hi-fi) → case study export
 ```
 Each project picks its phases (presets: Standard, Fast concept, Through hi-fi) and a design system.
-Lo-fi and hi-fi screens are real design-system markup (Siemens iX), shown in a greyscale wireframe theme for lo-fi.
+Lo-fi and hi-fi screens are real design-system markup (Siemens iX), always rendered in full theme colors.
 
 ## Architecture
 | Path | Role |
@@ -21,8 +21,8 @@ Lo-fi and hi-fi screens are real design-system markup (Siemens iX), shown in a g
 | `src/core/pipeline.ts` | Per-phase **zod output schema**, phase metadata and the Markdown renderer (Markdown is what downstream agents and exports read). |
 | `src/core/context.ts` | Knowledge-base retrieval: whole sources when small, otherwise BM25-ranked passages for the phase. Runs before the prompt, so agents still get no tools. |
 | `src/core/agents.ts` | Loads `agents/<id>/AGENT.md` (frontmatter + prompt), prepends `agents/_shared.md`, and appends enabled packs from `agents/_custom/`. Also saves edits from the Agents page, with backups in `agents/.history/`. |
-| `src/core/designSystems.ts` | Registry of `design-systems/<id>/`: `DESIGN_SYSTEM.md` (rules, sent to designing agents) + `components.md` (catalog, sent to screen agents). Generates the iX wireframe theme from iX's own tokens. |
-| `src/core/screens.ts` | Wraps agent HTML into standalone documents, strips scripts and switches fidelity. |
+| `src/core/designSystems.ts` | Registry of `design-systems/<id>/`: `DESIGN_SYSTEM.md` (rules, sent to designing agents) + `components.md` (catalog, sent to screen agents). |
+| `src/core/screens.ts` | Wraps agent HTML into standalone documents and strips scripts. |
 | `src/core/llm.ts` | `LLMProvider` + `CopilotProvider` (`@github/copilot-sdk`): model fallback chains, reasoning effort, served-model and token usage. Agents get **no tools**; sessions are deleted after each run. |
 | `src/core/store.ts` | File-based project memory (layout below). Shared with the MCP server. Skips project folders it can't read (older versions, damaged files) without touching them. |
 | `src/core/metrics.ts` | Usage counts derived from project memory, for the designer's stats and optional anonymous sharing. Numbers and fixed ids only. |

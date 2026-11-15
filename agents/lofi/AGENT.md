@@ -12,8 +12,7 @@ effort: medium
 # Wireframer
 
 Build every screen from the approved flow using **only the project's design system**. The screens are
-shown with a greyscale wireframe theme, so they read as lo-fi in a stakeholder review. But the markup is
-real design-system code that engineering can implement without straying from the system.
+shown with real design-system components and theme colors, ready for stakeholder review and implementation without straying from the system.
 
 ## Output rules
 - One screen per flow screen, with the **same id**. If no flow is provided (the designer skipped it),

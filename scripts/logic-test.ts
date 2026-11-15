@@ -12,7 +12,7 @@ import { selectContext } from '../src/core/context'
 import { flowToMermaid, migrate } from '../src/core/pipeline'
 import { jsonDiff, Orchestrator } from '../src/core/orchestrator'
 import { Store } from '../src/core/store'
-import { prototypeLinks, stripScripts, withFidelity, withTheme } from '../src/core/screens'
+import { prototypeLinks, stripScripts, withTheme } from '../src/core/screens'
 import { pipelineWarnings } from '../src/shared/pipelineRules'
 import { PIPELINE_PRESETS, STAGE_IDS, type StageId } from '../src/shared/types'
 
@@ -226,23 +226,15 @@ await test('structured edits: field-level diff logged, snapshot kept, downstream
   assert.doesNotMatch(seen.shape.system, /component reference/) // guide only, no catalog
 })
 
-await test('lo-fi: real iX markup in a greyscale wireframe theme, scripts stripped, fidelity switchable', async () => {
+await test('lo-fi: real iX markup in full colour, scripts stripped, theme switchable', async () => {
   orch.approve(id, 'shape')
   await orch.run(id, 'lofi')
   assert.match(seen.lofi.system, /Siemens iX 5\.3\.0: component reference/)
   const html = fs.readFileSync(path.join(store.screensDir(id, 'lofi', 1), 'alarm-list.html'), 'utf8')
   assert.match(html, /data-ix-theme="classic"/)
-  assert.match(html, /data-uxs-fidelity="wireframe"/)
-  assert.match(html, /<style id="uxs-wireframe" media="all">/)
   assert.doesNotMatch(html, /onclick|alert\(1\)/)
-  assert.match(withFidelity(html, 'full'), /media="not all"/)
-  const wf = /<style id="uxs-wireframe"[^>]*>([^<]*)</.exec(html)![1]
-  assert.ok(wf.length > 1000)
-  assert.match(wf, /\[data-ix-theme=classic\]\[data-ix-color-schema=light\]/)
-  assert.match(wf, /\[data-ix-theme=classic\]\[data-ix-color-schema=dark\]/)
   assert.match(withTheme(html, 'dark'), /data-ix-color-schema="dark"/)
-  assert.match(orch.screenHtml(html, 'wireframe', 'dark'), /data-ix-color-schema="dark"/)
-  for (const m of wf.matchAll(/rgba?\((\d+),(\d+),(\d+)/g)) assert.ok(m[1] === m[2] && m[2] === m[3], `non-grey token ${m[0]}`)
+  assert.match(orch.screenHtml(html, 'dark'), /data-ix-color-schema="dark"/)
 })
 
 await test('targeted comments: merged into the revision, marked sent, can no longer be deleted', async () => {
@@ -326,7 +318,7 @@ await test('reopen relocks later phases with the reason; hi-fi reads the approve
   orch.approve(id, 'lofi')
   await orch.run(id, 'hifi')
   assert.match(seen.hifi.prompt, /# Approved Lo-fi screens \(HTML\)[\s\S]*ix-application/)
-  assert.match(fs.readFileSync(path.join(store.screensDir(id, 'hifi', 1), 'alarm-list.html'), 'utf8'), /data-uxs-fidelity="full"/)
+  assert.match(fs.readFileSync(path.join(store.screensDir(id, 'hifi', 1), 'alarm-list.html'), 'utf8'), /data-ix-theme="classic"/)
 })
 
 await test('fast preset: Flow works from the brief and is told only Concepts was skipped', async () => {

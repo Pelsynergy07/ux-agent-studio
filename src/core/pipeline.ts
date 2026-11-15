@@ -267,7 +267,7 @@ export const STAGES: StageMeta[] = [
   { id: 'align', title: 'Align', short: 'Align', summary: 'Questions, flows and KPIs', gate: 'Ready to shape?' },
   { id: 'explore', title: 'Concepts', short: 'Concepts', summary: 'Three different ways to solve it', gate: 'Go with the chosen concept?' },
   { id: 'shape', title: 'Flow', short: 'Flow', summary: 'User flows, edge cases and impact', gate: 'Flow looks right?' },
-  { id: 'lofi', title: 'Lo-fi', short: 'Lo-fi', summary: 'Clickable wireframes', gate: 'Ready to share?' },
+  { id: 'lofi', title: 'Lo-fi', short: 'Lo-fi', summary: 'Clickable screens', gate: 'Ready to share?' },
   { id: 'hifi', title: 'Hi-fi', short: 'Hi-fi', summary: 'Final UI', gate: 'Final UI approved?' },
 ]
 export const stageTitle = (s: StageId | 'casestudy') => (s === 'casestudy' ? 'Case study' : STAGES.find((x) => x.id === s)!.title)
@@ -423,7 +423,7 @@ export function render(stage: StageId, data: unknown, extra?: { answers?: Record
     case 'hifi': {
       const d = data as StageData<'lofi'>
       return [
-        `# ${stage === 'lofi' ? 'Lo-fi wireframes' : 'Hi-fi UI'}`,
+        `# ${stage === 'lofi' ? 'Lo-fi screens' : 'Hi-fi UI'}`,
         d.notes,
         `**Components used:** ${d.componentsUsed.join(', ') || '—'}`,
         `## Screens`,

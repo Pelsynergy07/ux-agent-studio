@@ -82,7 +82,6 @@ export function ReviewPage({ token }: { token: string }) {
       <ScreenViewer
         screens={data.screens}
         version={data.version}
-        canSwitchFidelity={data.stage === 'lofi'}
         comments={data.comments}
         query={`&token=${token}`}
         nameField={nameField}

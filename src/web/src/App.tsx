@@ -312,13 +312,14 @@ export function App() {
                         />
                         <Folder aria-hidden="true" className="side-folder-icon" />
                         <span className="side-folder-title">{folderName}</span>
-                        <span className="side-count">{folderProjects.length}</span>
                       </button>
+                      <span className="side-count">{folderProjects.length}</span>
                       <div className="side-folder-menu-wrap">
                         <button
                           type="button"
                           className={`side-folder-more ${folderMenuOpen === folderName ? 'active' : ''}`}
                           title="Folder options"
+                          aria-label="Folder options"
                           onClick={(e) => {
                             e.stopPropagation()
                             setFolderMenuOpen(folderMenuOpen === folderName ? null : folderName)
@@ -327,13 +328,14 @@ export function App() {
                           <MoreVertical aria-hidden="true" />
                         </button>
                         {folderMenuOpen === folderName && (
-                          <div className="folder-popover side-folder-popover">
+                          <div className="side-folder-popover" onClick={(e) => e.stopPropagation()}>
                             <button
                               type="button"
-                              className="danger"
+                              className="side-folder-danger-btn"
                               onClick={() => void handleDeleteProjectFolder(folderName)}
                             >
-                              <Trash2 aria-hidden="true" /> Delete folder
+                              <Trash2 aria-hidden="true" />
+                              <span>Delete folder</span>
                             </button>
                           </div>
                         )}
@@ -438,6 +440,7 @@ export function App() {
                     <div className="side-folder-row unassigned-header">
                       <span className="side-folder-title muted small">Other projects</span>
                       <span className="side-count">{unorganizedProjects.length}</span>
+                      <div className="side-folder-spacer" aria-hidden="true" />
                     </div>
                   )}
                   <div className="side-folder-items root-items">

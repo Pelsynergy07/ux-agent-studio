@@ -1,7 +1,7 @@
 // Screen previews for designers and stakeholders: real design-system screens, scaled from a true
-// desktop viewport, clickable as a prototype (data-goto links). Primary controls: fidelity, comment,
+// desktop viewport, clickable as a prototype (data-goto links). Primary controls: comment,
 // studio, present; the rest under "More".
-import { Columns2, Maximize2, MessageSquare, Monitor, Moon, MoreHorizontal, MousePointerClick, Palette, ScanLine, Sun, Tablet, Wand2 } from 'lucide-react'
+import { Columns2, Maximize2, MessageSquare, Monitor, Moon, MoreHorizontal, MousePointerClick, Sun, Tablet, Wand2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { Comment, Screen } from '../../../shared/types'
 import { previewOrigin } from '../api'
@@ -18,8 +18,6 @@ interface Props {
   /** Previous version's screens, for side-by-side comparison. */
   previous?: { version: number; screens: Screen[] }
   version: number
-  /** Lo-fi screens can be previewed in full colour without regenerating. */
-  canSwitchFidelity: boolean
   comments: Comment[]
   onComment: (c: { screenId: string; anchor: string; element?: Comment['element']; text: string }) => Promise<void>
   onRemoveComment?: (id: string) => Promise<void>
@@ -31,9 +29,8 @@ interface Props {
   onOpen?: (mode: 'studio' | 'present') => void
 }
 
-export function ScreenViewer({ screens, previous, version, canSwitchFidelity, comments, onComment, onRemoveComment, query = '', nameField, onOpen }: Props) {
+export function ScreenViewer({ screens, previous, version, comments, onComment, onRemoveComment, query = '', nameField, onOpen }: Props) {
   const [active, setActive] = useState(screens[0]?.id)
-  const [fidelity, setFidelity] = useState<'wireframe' | 'full'>('wireframe')
   const [theme, setTheme] = useState<'light' | 'dark'>(screens[0]?.theme ?? 'light')
   const [viewport, setViewport] = useState<Viewport>('desktop')
   const [commenting, setCommenting] = useState(false)
@@ -77,7 +74,7 @@ export function ScreenViewer({ screens, previous, version, canSwitchFidelity, co
 
   if (!screen) return <p className="muted">No screens yet.</p>
   const prevScreen = previous?.screens.find((s) => s.id === active)
-  const src = (s: Screen) => `${previewOrigin()}${s.url}?${new URLSearchParams({ fidelity: canSwitchFidelity ? fidelity : '', theme, annotate: commenting ? '1' : '', proto: commenting ? '' : '1' })}${query}`
+  const src = (s: Screen) => `${previewOrigin()}${s.url}?${new URLSearchParams({ theme, annotate: commenting ? '1' : '', proto: commenting ? '' : '1' })}${query}`
   const mine = comments.filter((c) => c.screenId === active)
   const openCount = (id: string) => comments.filter((c) => c.screenId === id && !c.sentInVersion).length
   const unsent = mine.filter((c) => !c.sentInVersion).length
@@ -99,18 +96,6 @@ export function ScreenViewer({ screens, previous, version, canSwitchFidelity, co
       <div className="viewer-bar">
         <Tabs label="Screens" value={active!} onChange={(v) => (setActive(v), setPicked(null))} tabs={screens.map((s) => ({ value: s.id, label: s.title, count: openCount(s.id) }))} />
         <div className="viewer-tools">
-          {canSwitchFidelity && (
-            <Segmented
-              label="Fidelity"
-              size="sm"
-              value={fidelity}
-              onChange={setFidelity}
-              options={[
-                { value: 'wireframe', label: 'Wireframe', icon: ScanLine },
-                { value: 'full', label: 'Colour', icon: Palette },
-              ]}
-            />
-          )}
           <Segmented
             label="Theme"
             size="sm"

@@ -323,14 +323,14 @@ async function readBody(req: http.IncomingMessage): Promise<unknown[]> {
   return Array.isArray(parsed) ? parsed : [parsed]
 }
 
-/** Serves a file under `base`; screen HTML gets local asset URLs, a fidelity switch and optional annotation. */
-function serveFile(res: http.ServerResponse, base: string, rel: string, opts?: { fidelity?: string | null; theme?: string | null; annotate?: boolean; edit?: boolean; proto?: boolean; link?: boolean }) {
+/** Serves a file under `base`; screen HTML gets local asset URLs and optional annotation. */
+function serveFile(res: http.ServerResponse, base: string, rel: string, opts?: { theme?: string | null; annotate?: boolean; edit?: boolean; proto?: boolean; link?: boolean }) {
   const file = path.resolve(base, rel)
   if (!file.startsWith(path.resolve(base) + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return send(res, 404, 'Not found', 'text/plain')
   const type = TYPES[path.extname(file)] ?? 'application/octet-stream'
   if (file.endsWith('.html')) {
     let html = fs.readFileSync(file, 'utf8').replaceAll(IX_CDN, '/vendor/ix').replaceAll(IX_ICONS_CDN, '/vendor/ix-icons')
-    html = orch.screenHtml(html, opts?.fidelity ?? undefined, opts?.theme ?? undefined)
+    html = orch.screenHtml(html, opts?.theme ?? undefined)
     if (opts?.annotate) html = html.replace('</body>', `<script>${ANNOTATE_SCRIPT}</script></body>`)
     if (opts?.edit) html = html.replace('</body>', `<script>${EDIT_SCRIPT}</script></body>`)
     if (opts?.proto) html = html.replace('</body>', `<script>${PROTO_SCRIPT}</script></body>`)
@@ -403,7 +403,7 @@ const preview = http.createServer((req, res) => {
       }
       // Text and link editing are designer-only powers: never for remote (stakeholder) requests.
       const q = (k: string) => url.searchParams.get(k) === '1'
-      return serveFile(res, store.dir(projectId), rest.join('/'), { fidelity: url.searchParams.get('fidelity'), theme: url.searchParams.get('theme'), annotate: q('annotate'), edit: isLocal(req) && q('edit'), proto: q('proto'), link: isLocal(req) && q('link') })
+      return serveFile(res, store.dir(projectId), rest.join('/'), { theme: url.searchParams.get('theme'), annotate: q('annotate'), edit: isLocal(req) && q('edit'), proto: q('proto'), link: isLocal(req) && q('link') })
     }
     if (parts[0] === 'vendor' && parts[1] === 'ix') return serveFile(res, ixDist, parts.slice(2).join('/'))
     if (parts[0] === 'vendor' && parts[1] === 'ix-icons') return serveFile(res, ixIconsRoot, parts.slice(2).join('/'))

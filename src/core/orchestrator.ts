@@ -14,7 +14,7 @@ import type { DesignSystem } from './designSystems'
 import type { LLMProvider } from './llm'
 import { CONTEXT_BUDGET, selectContext, wordCount } from './context'
 import { caseStudySchema, EDGE_AREAS, migrate, render, schemas, STAGES, stageTitle as title, type StageData } from './pipeline'
-import { prototypeLinks, stripScripts, withFidelity, withTheme, wrapScreen } from './screens'
+import { prototypeLinks, stripScripts, withTheme, wrapScreen } from './screens'
 import { slug, type Store } from './store'
 import { effectiveAnswer, isStarted, nextInPipeline, recomputeGates, validatePipeline } from '../shared/pipelineRules'
 import { STAGE_IDS, type AgentEvent, type Budget, type CaseStudyInfo, type Checklist, type Comment, type ContextSource, type Decision, type LibraryItem, type ProjectSources, type Readiness, type Project, type ProjectSummary, type ReviewPayload, type Screen, type StageArtifact, type StageId } from '../shared/types'
@@ -325,7 +325,7 @@ export class Orchestrator {
         return { ...s, id: sid }
       })
       const ds = this.ds(p)
-      store.writeScreens(p.id, stage, version, w.screens.map((s) => ({ id: s.id, html: wrapScreen(ds, stage === 'lofi' ? 'wireframe' : 'full', s.title, s.bodyHtml, s.css ?? '', s.theme) })))
+      store.writeScreens(p.id, stage, version, w.screens.map((s) => ({ id: s.id, html: wrapScreen(ds, s.title, s.bodyHtml, s.css ?? '', s.theme) })))
       data = w
     }
     store.writeVersion(p.id, stage, version, data, render(stage, data, { answers: QUESTION_STAGES.includes(stage) ? store.answers(p.id, stage) : undefined }))
@@ -1172,10 +1172,11 @@ export class Orchestrator {
     this.d.store.save(p)
   }
 
-  /** Renders a stored screen at the requested fidelity and theme (lo-fi screens can be previewed in full colour, and screens can toggle light/dark). */
-  screenHtml(html: string, fidelity?: string, theme?: string): string {
+  /** Renders a stored screen at the requested theme (screens can toggle light/dark). */
+  screenHtml(html: string, theme?: string): string {
     let out = html
-    if (fidelity === 'full' || fidelity === 'wireframe') out = withFidelity(out, fidelity)
+    out = out.replace(/(<style id="uxs-wireframe" media=")[^"]*"/, '$1not all"')
+             .replace(/data-uxs-fidelity="[a-z]+"/g, 'data-uxs-fidelity="full"')
     if (theme === 'dark' || theme === 'light' || theme === 'system') out = withTheme(out, theme)
     return out
   }
@@ -1235,7 +1236,7 @@ export class Orchestrator {
     return {
       flows: (shape?.flows ?? []).map((f) => ({ name: `${f.id} ${f.name}`, url: `${appBase}/#/render/flow/${id}/${encodeURIComponent(f.id)}` })),
       concepts: p.stages.explore.version ? { url: `${appBase}/#/render/concepts/${id}` } : undefined,
-      screens: screens.map((s) => ({ title: s.title, url: `${previewBase}${s.url}?fidelity=${screenStage === 'lofi' ? 'wireframe' : ''}` })),
+      screens: screens.map((s) => ({ title: s.title, url: `${previewBase}${s.url}` })),
     }
   }
 

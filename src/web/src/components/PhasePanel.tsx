@@ -357,7 +357,6 @@ export function PhasePanel({ project, meta, stages, agent, progress, comments, d
                       screens={artifact.screens}
                       version={artifact.version}
                       previous={previous?.screens ? { version: previous.version, screens: previous.screens } : undefined}
-                      canSwitchFidelity={meta.id === 'lofi'}
                       comments={mine}
                       onComment={ctx.comment}
                       onRemoveComment={ctx.removeComment}
