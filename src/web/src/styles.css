@@ -1739,15 +1739,18 @@ html.theme-fade *, html.theme-fade *::before, html.theme-fade *::after { transit
 .badge-ui-ref {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  white-space: nowrap;
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 600;
+  line-height: 1.2;
   text-transform: uppercase;
-  letter-spacing: .05em;
+  letter-spacing: .04em;
   color: var(--accent);
   background: var(--accent-soft);
   border: 1px solid var(--accent-line);
-  padding: 2px 7px;
+  padding: 3px 8px;
   border-radius: 999px;
   flex: none;
 }

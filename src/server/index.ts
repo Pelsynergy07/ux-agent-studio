@@ -422,6 +422,28 @@ const server = http.createServer(async (req, res) => {
     // Designer API: this machine only, JSON with a custom header (blocks cross-site form posts).
     if (parts[0] === 'api') {
       if (!isLocal(req)) return send(res, 403, { error: 'The designer API is only available on this computer.' })
+
+      // UI Reference Images: Library images (GET /api/library/images/:filename)
+      if (parts[1] === 'library' && parts[2] === 'images') {
+        const file = parts.slice(3).join('/')
+        if (!/^[a-z0-9_.-]+$/i.test(file)) return send(res, 400, 'Invalid filename', 'text/plain')
+        const f = path.join(store.libraryImagesDir(), file)
+        if (!fs.existsSync(f)) return send(res, 404, 'Not found', 'text/plain')
+        res.writeHead(200, { 'Content-Type': TYPES[path.extname(f).toLowerCase()] ?? 'image/png', 'Cache-Control': 'public, max-age=86400' })
+        return fs.createReadStream(f).pipe(res)
+      }
+
+      // UI Reference Images: Project context images (GET /api/projects/:id/context/images/:filename)
+      if (parts[1] === 'projects' && parts[3] === 'context' && parts[4] === 'images') {
+        const projectId = parts[2]
+        const file = parts.slice(5).join('/')
+        if (!/^[a-z0-9_.-]+$/i.test(file)) return send(res, 400, 'Invalid filename', 'text/plain')
+        const f = path.join(store.contextImagesDir(projectId), file)
+        if (!fs.existsSync(f)) return send(res, 404, 'Not found', 'text/plain')
+        res.writeHead(200, { 'Content-Type': TYPES[path.extname(f).toLowerCase()] ?? 'image/png', 'Cache-Control': 'public, max-age=86400' })
+        return fs.createReadStream(f).pipe(res)
+      }
+
       if (parts[1] === 'events') {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' })
         res.write(': connected\n\n')
@@ -448,27 +470,6 @@ const server = http.createServer(async (req, res) => {
       const f = path.join(orch.caseStudyDir(projectId), file)
       if (!fs.existsSync(f)) return send(res, 404, 'Not found', 'text/plain')
       res.writeHead(200, { 'Content-Type': TYPES[path.extname(f)] ?? 'application/octet-stream', 'Content-Disposition': `attachment; filename="${projectId}-${file}"`, 'Cache-Control': 'no-store' })
-      return fs.createReadStream(f).pipe(res)
-    }
-
-    // UI Reference Images: Library images
-    if (parts[0] === 'api' && parts[1] === 'library' && parts[2] === 'images') {
-      const file = parts.slice(3).join('/')
-      if (!/^[a-z0-9_.-]+$/i.test(file)) return send(res, 400, 'Invalid filename', 'text/plain')
-      const f = path.join(store.libraryImagesDir(), file)
-      if (!fs.existsSync(f)) return send(res, 404, 'Not found', 'text/plain')
-      res.writeHead(200, { 'Content-Type': TYPES[path.extname(f).toLowerCase()] ?? 'image/png', 'Cache-Control': 'public, max-age=86400' })
-      return fs.createReadStream(f).pipe(res)
-    }
-
-    // UI Reference Images: Project context images
-    if (parts[0] === 'api' && parts[1] === 'projects' && parts[3] === 'context' && parts[4] === 'images') {
-      const projectId = parts[2]
-      const file = parts.slice(5).join('/')
-      if (!/^[a-z0-9_.-]+$/i.test(file)) return send(res, 400, 'Invalid filename', 'text/plain')
-      const f = path.join(store.contextImagesDir(projectId), file)
-      if (!fs.existsSync(f)) return send(res, 404, 'Not found', 'text/plain')
-      res.writeHead(200, { 'Content-Type': TYPES[path.extname(f).toLowerCase()] ?? 'image/png', 'Cache-Control': 'public, max-age=86400' })
       return fs.createReadStream(f).pipe(res)
     }
 

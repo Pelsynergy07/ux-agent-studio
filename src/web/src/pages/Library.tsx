@@ -306,7 +306,7 @@ export function Library() {
                 }
               }}
             >
-              Add note
+              Add
             </Button>
           </div>
         }
@@ -353,9 +353,9 @@ export function Library() {
         </Modal>
       )}
 
-      {/* New Note / Document Modal */}
+      {/* New Item Modal */}
       {composerOpen && (
-        <Modal title="Add document or note" onClose={() => setComposerOpen(false)} wide>
+        <Modal title="Add to Library" onClose={() => setComposerOpen(false)} wide>
           <form
             onSubmit={(e) => {
               e.preventDefault()
@@ -842,7 +842,7 @@ export function Library() {
                         <span>Tags</span>
                       </div>
                     </th>
-                    <th style={{ width: 85 }}>
+                    <th style={{ width: 95 }}>
                       <div className="notion-th-content">
                         <AlignLeft aria-hidden="true" />
                         <span>Words</span>
