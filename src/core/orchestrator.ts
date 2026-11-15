@@ -1175,7 +1175,7 @@ export class Orchestrator {
   /** Renders a stored screen at the requested theme (screens can toggle light/dark). */
   screenHtml(html: string, theme?: string): string {
     let out = html
-    out = out.replace(/(<style id="uxs-wireframe" media=")[^"]*"/, '$1not all"')
+    out = out.replace(/<style id="uxs-wireframe"[\s\S]*?<\/style>/gi, '')
              .replace(/data-uxs-fidelity="[a-z]+"/g, 'data-uxs-fidelity="full"')
     if (theme === 'dark' || theme === 'light' || theme === 'system') out = withTheme(out, theme)
     return out
